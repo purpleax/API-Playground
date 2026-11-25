@@ -16,6 +16,7 @@ struct ResponseView: View {
     var body: some View {
         let state = model.responses[requestID]
         let result = finished(state)
+        let redactor = model.redactor(for: requestID)
         VStack(alignment: .leading, spacing: 0) {
             statusBar(result)
                 .frame(height: 30)
@@ -34,7 +35,7 @@ struct ResponseView: View {
             Divider()
 
             if tab == .history {
-                HistoryView(requestID: requestID, current: result?.response)
+                HistoryView(requestID: requestID, current: result?.response, redactor: redactor)
             } else if case .sending = state {
                 VStack {
                     Spacer()
@@ -45,11 +46,11 @@ struct ResponseView: View {
             } else if let result {
                 if tab == .tests {
                     ScrollView {
-                        TestResultsView(result: result)
+                        TestResultsView(result: result, redactor: redactor)
                             .padding(12)
                     }
                 } else if let response = result.response, let prepared = result.prepared {
-                    content(response, prepared)
+                    content(response, prepared, redactor)
                 } else if result.skipped {
                     placeholder("The request was skipped", systemImage: "forward.end", detail: "A pre-request script called pm.execution.skipRequest().")
                 } else {
@@ -90,15 +91,31 @@ struct ResponseView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(Self.statusColor(response.status), in: RoundedRectangle(cornerRadius: 5))
-                pill(Self.duration(response.timings.total))
                 pill(ByteCountFormatter.string(fromByteCount: Int64(response.body.count), countStyle: .file))
-                pill(response.httpVersion)
+                if let name = model.pinnedShown[requestID] {
+                    Label("Pinned: \(name)", systemImage: "pin.fill")
+                        .foregroundStyle(.orange)
+                        .help("This is a saved response, not a live one. Send the request to replace it.")
+                } else {
+                    pill(Self.duration(response.timings.total))
+                    pill(response.httpVersion)
+                }
                 if !result.tests.isEmpty || result.scriptError != nil {
                     let failed = result.failedTests.count + (result.scriptError == nil ? 0 : 1)
                     Label(failed == 0 ? "Tests passed" : "\(failed) failed", systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(failed == 0 ? Color.green : Color.red)
                 }
                 Spacer()
+                if model.pinnedShown[requestID] == nil {
+                    Button {
+                        model.pinResponse(requestID)
+                    } label: {
+                        Image(systemName: "pin")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Pin this response: keep it with the request to show again or serve from a mock")
+                }
+                pinnedMenu
             }
         } else {
             HStack {
@@ -106,7 +123,32 @@ struct ResponseView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                pinnedMenu
             }
+        }
+    }
+
+    /// Lists the request's pinned responses, to show one or remove it.
+    @ViewBuilder
+    private var pinnedMenu: some View {
+        let examples = model.request(requestID)?.examples ?? []
+        if !examples.isEmpty {
+            Menu {
+                ForEach(Array(examples.enumerated()), id: \.offset) { _, example in
+                    Button("Show \"\(example.name)\"") { model.showPinned(requestID, example) }
+                }
+                Divider()
+                Menu("Remove") {
+                    ForEach(Array(examples.enumerated()), id: \.offset) { _, example in
+                        Button(example.name, role: .destructive) { model.removePinned(requestID, name: example.name) }
+                    }
+                }
+            } label: {
+                Label("\(examples.count)", systemImage: "pin.fill")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Pinned responses")
         }
     }
 
@@ -127,7 +169,7 @@ struct ResponseView: View {
     }
 
     @ViewBuilder
-    private func content(_ response: HTTPResponse, _ prepared: PreparedRequest) -> some View {
+    private func content(_ response: HTTPResponse, _ prepared: PreparedRequest, _ redactor: Redactor?) -> some View {
         switch tab {
         case .body:
             VStack(alignment: .leading, spacing: 0) {
@@ -150,7 +192,8 @@ struct ResponseView: View {
                             .padding(.vertical, 6)
                         Divider()
                     }
-                    ReadOnlyCode(text: pretty ? (formatted ?? text) : text)
+                    let shown = pretty ? (formatted ?? text) : text
+                    ReadOnlyCode(text: redactor?.redact(shown) ?? shown)
                 } else {
                     placeholder("Binary data", systemImage: "doc.zipper", detail: "\(response.body.count) bytes that are not text.")
                 }
@@ -159,7 +202,10 @@ struct ResponseView: View {
             Table(response.headers.enumerated().map { HeaderRow(id: $0.offset, header: $0.element) }) {
                 TableColumn("Name") { Text($0.header.name).textSelection(.enabled) }
                     .width(min: 120, ideal: 220)
-                TableColumn("Value") { Text($0.header.value).textSelection(.enabled) }
+                TableColumn("Value") { row in
+                    Text(redactor?.header(name: row.header.name, value: row.header.value) ?? row.header.value)
+                        .textSelection(.enabled)
+                }
             }
             .font(.system(.body, design: .monospaced))
         case .timing:
@@ -168,7 +214,7 @@ struct ResponseView: View {
                     .padding(12)
             }
         case .log:
-            ReadOnlyCode(text: Self.logText(response.wireLog))
+            ReadOnlyCode(text: Self.logText(response.wireLog, redactor: redactor))
         case .tests, .history:
             EmptyView()
         }
@@ -192,7 +238,7 @@ struct ResponseView: View {
         seconds < 1 ? String(format: "%.0f ms", seconds * 1000) : String(format: "%.2f s", seconds)
     }
 
-    static func logText(_ log: [WireLogEntry]) -> String {
+    static func logText(_ log: [WireLogEntry], redactor: Redactor? = nil) -> String {
         log.map { entry in
             let prefix: String
             switch entry.kind {
@@ -202,7 +248,7 @@ struct ResponseView: View {
             }
             // "\r\n" is a single Character in Swift, so split on any newline rather than on "\n".
             return entry.text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
-                .map { prefix + $0 }
+                .map { prefix + (redactor?.headerLine(String($0)) ?? String($0)) }
                 .joined(separator: "\n")
         }
         .joined(separator: "\n")
@@ -265,6 +311,7 @@ struct HistoryView: View {
     @Environment(AppModel.self) private var model
     let requestID: UUID
     let current: HTTPResponse?
+    var redactor: Redactor?
 
     @State private var entries: [HistoryEntry] = []
     @State private var selected: UUID?
@@ -316,7 +363,7 @@ struct HistoryView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                     Divider()
-                    DiffView(lines: lines)
+                    DiffView(lines: redactor.map { r in lines.map { DiffLine(kind: $0.kind, text: r.redact($0.text)) } } ?? lines)
                 }
             }
         } else {

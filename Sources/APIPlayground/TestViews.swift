@@ -137,15 +137,20 @@ struct TestsEditor: View {
 /// The outcome of one request's checks and scripts.
 struct TestResultsView: View {
     let result: RequestRunResult
+    var redactor: Redactor?
+
+    private func shown(_ text: String) -> String {
+        redactor?.redact(text) ?? text
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let error = result.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                Label(shown(error), systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
             if let error = result.scriptError {
-                Label("Script error: \(error)", systemImage: "exclamationmark.triangle.fill")
+                Label("Script error: \(shown(error))", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
             if result.skipped {
@@ -161,9 +166,9 @@ struct TestResultsView: View {
                     Image(systemName: test.skipped ? "minus.circle" : (test.passed ? "checkmark.circle.fill" : "xmark.circle.fill"))
                         .foregroundStyle(test.skipped ? Color.secondary : (test.passed ? Color.green : Color.red))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(test.name)
+                        Text(shown(test.name))
                         if let message = test.message {
-                            Text(message)
+                            Text(shown(message))
                                 .font(.system(.callout, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
@@ -173,7 +178,7 @@ struct TestResultsView: View {
             if !result.logs.isEmpty {
                 Divider()
                 Text("Console").font(.headline)
-                Text(result.logs.joined(separator: "\n"))
+                Text(shown(result.logs.joined(separator: "\n")))
                     .font(.system(.callout, design: .monospaced))
                     .textSelection(.enabled)
             }

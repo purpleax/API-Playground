@@ -9,6 +9,38 @@ enum ResponseState {
     case finished(RequestRunResult)
 }
 
+/// A mock server that is running for one collection.
+struct MockSession {
+    var collectionID: UUID
+    var collectionName: String
+    var port: UInt16
+    var routes: [MockRoute]
+    var hits: [MockHit] = []
+    /// The variable pointed at the mock, such as "baseUrl", when the collection's URLs share one.
+    var baseVariable: String?
+    /// The environment made to redirect requests to the mock, and the one that was active before.
+    var environmentID: UUID?
+    var previousEnvironmentID: UUID?
+
+    var url: String { "http://127.0.0.1:\(port)" }
+}
+
+/// Which demo sequence is open in the editor.
+struct SequenceReference: Identifiable, Equatable {
+    var collectionID: UUID
+    var sequenceID: UUID
+    var id: UUID { sequenceID }
+}
+
+/// A demo being presented: the steps, and which one is showing.
+struct PresentationState {
+    var title: String
+    var steps: [DemoStep]
+    var index = 0
+
+    var step: DemoStep? { steps.indices.contains(index) ? steps[index] : nil }
+}
+
 /// One request in a folder or collection run.
 struct RunnerRow: Identifiable {
     let id: UUID
@@ -61,6 +93,20 @@ final class AppModel {
     var notice: Notice?
     var showingEnvironments = false
     var runner: RunnerSession?
+
+    /// Masks secrets everywhere they are displayed. Requests are still sent with real values.
+    var hideSecrets = UserDefaults.standard.bool(forKey: "hideSecrets") {
+        didSet { UserDefaults.standard.set(hideSecrets, forKey: "hideSecrets") }
+    }
+    /// The name of the pinned response on screen for a request, when one is showing instead of a live response.
+    var pinnedShown: [UUID: String] = [:]
+    var mock: MockSession?
+    var showingMock = false
+    /// The collection the Mock Server panel offers to start a mock for.
+    var mockTarget: UUID?
+    private var mockServer: MockServer?
+    var editingSequence: SequenceReference?
+    var presentation: PresentationState?
     private var runnerTask: Task<Void, Never>?
 
     private var saveTasks: [UUID: Task<Void, Never>] = [:]
@@ -233,6 +279,7 @@ final class AppModel {
     private func save(_ collection: APICollection) {
         saveTasks[collection.id]?.cancel()
         saveTasks[collection.id] = nil
+        if mock?.collectionID == collection.id { refreshMock() }
         do { try store.save(collection) } catch { show("Could not save \(collection.name)", error) }
     }
 
@@ -249,6 +296,8 @@ final class AppModel {
     }
 
     func flushSaves() {
+        // Remove the temporary mock environment rather than leaving it behind in the workspace.
+        stopMock()
         for id in Array(saveTasks.keys) {
             if let collection = collections.first(where: { $0.id == id }) { save(collection) }
         }
@@ -301,6 +350,7 @@ final class AppModel {
     }
 
     private func record(_ result: RequestRunResult) {
+        pinnedShown[result.requestID] = nil
         responses[result.requestID] = .finished(result)
         if let prepared = result.prepared, let response = result.response {
             try? history.record(HistoryEntry(request: prepared, response: response), requestID: result.requestID)
@@ -369,6 +419,204 @@ final class AppModel {
 
     func historyEntries(_ id: UUID) -> [HistoryEntry] {
         history.entries(requestID: id)
+    }
+
+    // MARK: Hiding secrets
+
+    /// Secrets are always hidden while presenting, whatever the setting.
+    var secretsHidden: Bool { hideSecrets || presentation != nil }
+
+    /// The redactor for a request's views, or nil when secrets are being shown.
+    func redactor(for requestID: UUID) -> Redactor? {
+        guard secretsHidden, let index = collectionIndex(containingRequest: requestID) else { return nil }
+        return Redactor(
+            variables: globals + collections[index].variables + (activeEnvironment?.variables ?? []),
+            auths: [collections[index].effectiveAuth(forRequest: requestID)],
+            resolver: resolver(forCollection: index)
+        )
+    }
+
+    /// The request as it would be sent now, for showing its real URL and body.
+    func preview(_ requestID: UUID) -> PreparedRequest? {
+        guard let index = collectionIndex(containingRequest: requestID), let request = collections[index].request(id: requestID) else { return nil }
+        return try? RequestBuilder.prepare(
+            request, auth: collections[index].effectiveAuth(forRequest: requestID), resolver: resolver(forCollection: index)
+        )
+    }
+
+    // MARK: Pinned responses
+
+    /// Saves the response on screen with the request, to show again later or serve from a mock.
+    func pinResponse(_ requestID: UUID) {
+        guard case .finished(let result) = responses[requestID], let response = result.response,
+              pinnedShown[requestID] == nil, var request = request(requestID) else { return }
+        let base = "\(response.status) \(response.statusText)".trimmingCharacters(in: .whitespaces)
+        request.examples.append(SavedResponse(name: uniqueName(base, among: request.examples.map(\.name)), pinning: response))
+        update(request)
+    }
+
+    func showPinned(_ requestID: UUID, _ example: SavedResponse) {
+        guard let request = request(requestID) else { return }
+        var result = RequestRunResult(requestID: requestID)
+        result.prepared = PreparedRequest(method: request.method, url: request.url)
+        result.response = example.asResponse
+        responses[requestID] = .finished(result)
+        pinnedShown[requestID] = example.name
+    }
+
+    func removePinned(_ requestID: UUID, name: String) {
+        guard var request = request(requestID) else { return }
+        request.examples.removeAll { $0.name == name }
+        update(request)
+        if pinnedShown[requestID] == name {
+            pinnedShown[requestID] = nil
+            responses[requestID] = nil
+        }
+    }
+
+    // MARK: Mock server
+
+    func startMock(collectionID: UUID) {
+        guard let collection = collections.first(where: { $0.id == collectionID }) else { return }
+        stopMock()
+        let routes = MockServer.routes(for: collection)
+        let server = MockServer(routes: routes)
+        server.onHit { hit in
+            Task { @MainActor in
+                AppModel.shared.mock?.hits.insert(hit, at: 0)
+                if let count = AppModel.shared.mock?.hits.count, count > 200 {
+                    AppModel.shared.mock?.hits.removeLast(count - 200)
+                }
+            }
+        }
+        Task {
+            do {
+                let port = try await server.start()
+                mockServer = server
+                var session = MockSession(
+                    collectionID: collectionID, collectionName: collection.name, port: port, routes: routes,
+                    baseVariable: MockServer.baseVariable(of: collection), previousEnvironmentID: activeEnvironmentID
+                )
+                // Point the collection at the mock with a temporary environment, leaving the user's own untouched.
+                if let variable = session.baseVariable {
+                    var variables = activeEnvironment?.variables ?? []
+                    variables.removeAll { $0.key == variable }
+                    variables.append(Variable(key: variable, value: session.url))
+                    let environment = APIEnvironment(name: uniqueName("Mock: \(collection.name)", among: environments.map(\.name)), variables: variables)
+                    saveEnvironment(environment)
+                    activeEnvironmentID = environment.id
+                    session.environmentID = environment.id
+                }
+                mock = session
+            } catch {
+                show("Could not start the mock server", error)
+            }
+        }
+    }
+
+    func stopMock() {
+        mockServer?.stop()
+        mockServer = nil
+        guard let session = mock else { return }
+        if let id = session.environmentID {
+            let wasActive = activeEnvironmentID == id
+            deleteEnvironment(id)
+            if wasActive, environments.contains(where: { $0.id == session.previousEnvironmentID }) {
+                activeEnvironmentID = session.previousEnvironmentID
+            }
+        }
+        mock = nil
+    }
+
+    /// Reloads the mock's routes after pinned responses change.
+    func refreshMock() {
+        guard let session = mock, let collection = collections.first(where: { $0.id == session.collectionID }) else { return }
+        let routes = MockServer.routes(for: collection)
+        guard routes != session.routes else { return }
+        let server = MockServer(routes: routes)
+        server.onHit { hit in
+            Task { @MainActor in AppModel.shared.mock?.hits.insert(hit, at: 0) }
+        }
+        mockServer?.stop()
+        mockServer = nil
+        Task {
+            // Reuse the port, so the environment that points at the mock stays valid.
+            for _ in 0..<20 {
+                if let port = try? await server.start(port: session.port) {
+                    mockServer = server
+                    mock?.routes = routes
+                    mock?.port = port
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            notice = Notice(title: "The mock server stopped", message: "It could not be restarted on port \(session.port). Start it again from the Mock Server panel.")
+            stopMock()
+        }
+    }
+
+    // MARK: Demo sequences
+
+    func newSequence(in collectionID: UUID) {
+        guard let index = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        var sequence = DemoSequence(name: uniqueName("New Demo", among: collections[index].sequences.map(\.name)))
+        // Start with every request in order: removing steps is quicker than adding them.
+        sequence.steps = collections[index].allRequests.map { DemoStep(requestID: $0.id) }
+        collections[index].sequences.append(sequence)
+        expanded.insert(collectionID)
+        save(collections[index])
+        editingSequence = SequenceReference(collectionID: collectionID, sequenceID: sequence.id)
+    }
+
+    func sequence(_ reference: SequenceReference) -> DemoSequence? {
+        collections.first { $0.id == reference.collectionID }?.sequences.first { $0.id == reference.sequenceID }
+    }
+
+    func updateSequence(_ sequence: DemoSequence, in collectionID: UUID) {
+        guard let index = collections.firstIndex(where: { $0.id == collectionID }),
+              let position = collections[index].sequences.firstIndex(where: { $0.id == sequence.id }) else { return }
+        collections[index].sequences[position] = sequence
+        scheduleSave(collectionID)
+    }
+
+    func deleteSequence(_ reference: SequenceReference) {
+        guard let index = collections.firstIndex(where: { $0.id == reference.collectionID }) else { return }
+        collections[index].sequences.removeAll { $0.id == reference.sequenceID }
+        save(collections[index])
+        if editingSequence == reference { editingSequence = nil }
+    }
+
+    // MARK: Presenting
+
+    func present(_ reference: SequenceReference) {
+        guard let sequence = sequence(reference) else { return }
+        let steps = sequence.steps.filter { request($0.requestID) != nil }
+        guard !steps.isEmpty else {
+            notice = Notice(title: "Nothing to present", message: "\"\(sequence.name)\" has no steps yet.")
+            return
+        }
+        editingSequence = nil
+        presentation = PresentationState(title: sequence.name, steps: steps)
+        selection = steps[0].requestID
+    }
+
+    /// Presents the selected request on its own.
+    func presentSelection() {
+        guard let id = selection, let request = request(id) else { return }
+        presentation = PresentationState(title: request.name, steps: [DemoStep(requestID: id)])
+    }
+
+    func presentationMove(by offset: Int) {
+        guard var state = presentation else { return }
+        let next = state.index + offset
+        guard state.steps.indices.contains(next) else { return }
+        state.index = next
+        presentation = state
+        selection = state.steps[next].requestID
+    }
+
+    func stopPresenting() {
+        presentation = nil
     }
 
     // MARK: Importing

@@ -4,7 +4,8 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 and 2 are built. See "Not yet checked" for what has not been tried on screen.
+Phases 1 and 2 are built and checked. Phase 3 (demo features) is built and its engine is
+tested, but its screens have not been tried yet. See "Not yet checked".
 
 Covered by engine tests:
 
@@ -21,6 +22,9 @@ Covered by engine tests:
 - Saving a response value into a variable for later requests
 - Pre-request and test scripts, run in JavaScriptCore with a Postman-compatible `pm` object
 - Collection, folder and request scripts running in Postman's order
+- Masking of secrets in bodies, headers, URLs and the wire log
+- Pinned responses, and demo sequences saved with the collection
+- A mock server that answers from pinned responses, including a whole collection run against its own mock
 
 Checked by hand in the running app:
 
@@ -37,6 +41,20 @@ Not yet checked:
 - Form, multipart, GraphQL and file body editors
 - Secret variables with the real Keychain (tests use an in-memory store)
 - Editing scripts and "Save from response" rows on screen, and running a single folder
+- All phase 3 screens: Hide Secrets, pinning and showing a pinned response, the Mock Server
+  panel, the demo sequence editor, and presentation mode with its keyboard controls
+
+### Demo features
+
+- **Hide Secrets** (Demo menu, or the eye in the toolbar) masks tokens, keys and passwords
+  wherever they are displayed. Requests still send the real values. It is always on while presenting.
+- **Pin** a response to keep it with the request. A pinned response can be shown in place of
+  a live one, and is what the mock server serves.
+- **Mock Server** answers on `127.0.0.1` only. When a collection's URLs start with a shared
+  variable such as `{{baseUrl}}`, starting the mock points that variable at it through a
+  temporary environment, which is removed when the mock stops.
+- **Demo sequences** list requests in order with a note each. **Present** shows one step at a
+  time in large type: Space sends, the arrow keys move, P shows the pinned response, Esc exits.
 
 ### Script support
 

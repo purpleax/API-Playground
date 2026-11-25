@@ -6,6 +6,7 @@ import SwiftUI
 struct CodeTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable = true
+    var fontSize: CGFloat = 12
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -15,7 +16,7 @@ struct CodeTextView: NSViewRepresentable {
         let scrollView = NSTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         textView.delegate = context.coordinator
-        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.isEditable = isEditable
         textView.isSelectable = true
         textView.isRichText = false
@@ -39,6 +40,9 @@ struct CodeTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? NSTextView else { return }
         textView.isEditable = isEditable
+        if textView.font?.pointSize != fontSize {
+            textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
         if textView.string != text {
             textView.string = text
         }
@@ -61,9 +65,10 @@ struct CodeTextView: NSViewRepresentable {
 /// Shows text that cannot be edited.
 struct ReadOnlyCode: View {
     let text: String
+    var fontSize: CGFloat = 12
 
     var body: some View {
-        CodeTextView(text: .constant(text), isEditable: false)
+        CodeTextView(text: .constant(text), isEditable: false, fontSize: fontSize)
     }
 }
 
@@ -73,6 +78,8 @@ struct KeyValueEditor: View {
     var keyTitle = "Name"
     var valueTitle = "Value"
     var allowsAdding = true
+    /// When true, values of rows whose name suggests a secret are shown as dots.
+    var hidesSecrets = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -83,7 +90,12 @@ struct KeyValueEditor: View {
                         .toggleStyle(.checkbox)
                     TextField(keyTitle, text: $item.key)
                         .frame(minWidth: 90, idealWidth: 160)
-                    TextField(valueTitle, text: $item.value)
+                    // A value that is only a {{variable}} reveals nothing, so it stays readable.
+                    if hidesSecrets && Redactor.isSensitiveName(item.key) && !item.value.contains("{{") {
+                        SecureField(valueTitle, text: $item.value)
+                    } else {
+                        TextField(valueTitle, text: $item.value)
+                    }
                     Button {
                         items.removeAll { $0.id == item.id }
                     } label: {
@@ -111,6 +123,8 @@ struct KeyValueEditor: View {
 /// An editable list of variables, each of which can be marked secret.
 struct VariableEditor: View {
     @Binding var variables: [Variable]
+    /// When true, values of variables whose name suggests a secret are shown as dots too.
+    var hidesSecrets = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -123,6 +137,12 @@ struct VariableEditor: View {
                         .frame(width: 150)
                     if variable.secret {
                         SecureField("Value", text: $variable.value)
+                    } else if hidesSecrets && Redactor.isSensitiveName(variable.key) {
+                        SecureField("Shared value", text: $variable.value)
+                        SecureField("This Mac only", text: Binding(
+                            get: { variable.currentValue ?? "" },
+                            set: { variable.currentValue = $0.isEmpty ? nil : $0 }
+                        ))
                     } else {
                         TextField("Shared value", text: $variable.value)
                         TextField("This Mac only", text: Binding(
@@ -191,12 +211,12 @@ struct EnvironmentsView: View {
                             Text("Globals").font(.headline)
                             Text("Available to every request. A collection or environment variable with the same name wins.")
                                 .foregroundStyle(.secondary)
-                            VariableEditor(variables: $globalsDraft)
+                            VariableEditor(variables: $globalsDraft, hidesSecrets: model.secretsHidden)
                         } else {
                             TextField("Environment name", text: $draft.name)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.headline)
-                            VariableEditor(variables: $draft.variables)
+                            VariableEditor(variables: $draft.variables, hidesSecrets: model.secretsHidden)
                         }
                     }
                     .padding()

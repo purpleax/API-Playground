@@ -14,6 +14,23 @@ struct SidebarView: View {
                     ForEach(collection.items) { node in
                         NodeView(node: node, collectionID: collection.id)
                     }
+                    ForEach(collection.sequences) { sequence in
+                        let reference = SequenceReference(collectionID: collection.id, sequenceID: sequence.id)
+                        Button {
+                            model.editingSequence = reference
+                        } label: {
+                            Label(sequence.name, systemImage: "play.rectangle")
+                        }
+                        .buttonStyle(.plain)
+                        .selectionDisabled()
+                        .help("Demo sequence: click to edit")
+                        .contextMenu {
+                            Button("Present") { model.present(reference) }
+                            Button("Edit") { model.editingSequence = reference }
+                            Divider()
+                            Button("Delete Demo", role: .destructive) { model.deleteSequence(reference) }
+                        }
+                    }
                 } label: {
                     if renaming == collection.id {
                         TextField("Name", text: $renameText)
@@ -28,6 +45,11 @@ struct SidebarView: View {
                 }
                 .contextMenu {
                     Button("Run Collection") { model.startRun(collectionID: collection.id) }
+                    Button("New Demo…") { model.newSequence(in: collection.id) }
+                    Button("Mock Server…") {
+                        model.mockTarget = collection.id
+                        model.showingMock = true
+                    }
                     Divider()
                     Button("New Request") { model.newRequest(in: collection.id) }
                     Button("New Folder") { model.newFolder(in: collection.id) }

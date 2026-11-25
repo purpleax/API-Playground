@@ -68,7 +68,7 @@ struct RequestEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Query parameters").font(.headline)
-                        KeyValueEditor(items: request.params)
+                        KeyValueEditor(items: request.params, hidesSecrets: model.secretsHidden)
                         if !request.wrappedValue.pathVariables.isEmpty {
                             Text("Path variables").font(.headline)
                             Text("Each replaces the matching :name part of the URL.")
@@ -81,7 +81,7 @@ struct RequestEditorView: View {
                 }
             case .headers:
                 ScrollView {
-                    KeyValueEditor(items: request.headers)
+                    KeyValueEditor(items: request.headers, hidesSecrets: model.secretsHidden)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -89,7 +89,7 @@ struct RequestEditorView: View {
                 BodyEditor(requestBody: request.body)
             case .auth:
                 ScrollView {
-                    AuthEditor(auth: request.auth, inherited: model.effectiveAuth(requestID))
+                    AuthEditor(auth: request.auth, inherited: model.effectiveAuth(requestID), hidesSecrets: model.secretsHidden)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -346,6 +346,18 @@ private struct AuthEditor: View {
     @Binding var auth: Auth
     /// What "inherit" resolves to for this request.
     let inherited: Auth
+    var hidesSecrets = false
+
+    /// A field for a secret part of the auth settings: dots while secrets are hidden,
+    /// unless the value is only a {{variable}}, which reveals nothing.
+    @ViewBuilder
+    private func secretField(_ title: String, _ text: Binding<String>) -> some View {
+        if hidesSecrets && !text.wrappedValue.contains("{{") {
+            SecureField(title, text: text)
+        } else {
+            TextField(title, text: text)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -371,16 +383,16 @@ private struct AuthEditor: View {
             case .basic(let username, let password):
                 Form {
                     TextField("Username", text: Binding(get: { username }, set: { auth = .basic(username: $0, password: password) }))
-                    TextField("Password", text: Binding(get: { password }, set: { auth = .basic(username: username, password: $0) }))
+                    secretField("Password", Binding(get: { password }, set: { auth = .basic(username: username, password: $0) }))
                 }
             case .bearer(let token):
                 Form {
-                    TextField("Token", text: Binding(get: { token }, set: { auth = .bearer(token: $0) }))
+                    secretField("Token", Binding(get: { token }, set: { auth = .bearer(token: $0) }))
                 }
             case .apiKey(let key, let value, let placement):
                 Form {
                     TextField("Name", text: Binding(get: { key }, set: { auth = .apiKey(key: $0, value: value, placement: placement) }))
-                    TextField("Value", text: Binding(get: { value }, set: { auth = .apiKey(key: key, value: $0, placement: placement) }))
+                    secretField("Value", Binding(get: { value }, set: { auth = .apiKey(key: key, value: $0, placement: placement) }))
                     Picker("Send in", selection: Binding(get: { placement }, set: { auth = .apiKey(key: key, value: value, placement: $0) })) {
                         Text("Header").tag(APIKeyPlacement.header)
                         Text("Query parameter").tag(APIKeyPlacement.query)
