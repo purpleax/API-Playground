@@ -60,6 +60,14 @@ Not yet checked:
 - **Demo sequences** list requests in order with a note each. **Present** shows one step at a
   time in large type: Space sends, the arrow keys move, P shows the pinned response, Esc exits.
 
+### Look and feel
+
+The interface is custom rather than standard macOS controls: a top bar in place of the
+toolbar, floating panels, colour-coded methods and status, underline tabs and
+syntax-coloured JSON. Every colour and shared control lives in
+`Sources/APIPlayground/Theme.swift`, so the palette can be changed in one place. The app is
+dark by default; View > Appearance switches to Light or Match System.
+
 ### Script support
 
 Scripts get `pm.test`, `pm.expect` (the commonly used Chai assertions), `pm.response`,

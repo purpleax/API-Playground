@@ -20,7 +20,8 @@ struct APIPlaygroundApp: App {
                     model.flushSaves()
                 }
         }
-        .defaultSize(width: 1280, height: 780)
+        .defaultSize(width: 1360, height: 840)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Request") { model.newRequestInCurrentCollection() }
@@ -53,6 +54,17 @@ struct APIPlaygroundApp: App {
                 Divider()
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
+            }
+            CommandGroup(after: .sidebar) {
+                Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+                    withAnimation(.snappy(duration: 0.2)) { model.sidebarVisible.toggle() }
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+                Picker("Appearance", selection: Binding(get: { model.appearance }, set: { model.appearance = $0 })) {
+                    ForEach(AppAppearance.allCases) { appearance in
+                        Text(appearance.title).tag(appearance)
+                    }
+                }
             }
             CommandMenu("Demo") {
                 Button(model.presentation == nil ? "Present Request" : "Stop Presenting") {
@@ -103,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when the app is run as a bare executable rather than from an app bundle.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        AppModel.shared.appearance.apply()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -121,77 +134,54 @@ struct ContentView: View {
 
     @ViewBuilder
     private var workspace: some View {
-        @Bindable var model = model
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 270, max: 420)
-        } detail: {
-            if let id = model.selection, model.request(id) != nil {
-                HSplitView {
-                    RequestEditorView(requestID: id)
-                        .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-                    ResponseView(requestID: id)
-                        .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            TopBar(importingPostman: $importingPostman)
+            HStack(spacing: 0) {
+                if model.sidebarVisible {
+                    SidebarView()
+                        .frame(width: 276)
+                        .frame(maxHeight: .infinity)
+                        .transition(.move(edge: .leading))
+                    Rectangle().fill(Theme.stroke).frame(width: 1)
                 }
-                .id(id)
-            } else {
-                ContentUnavailableView {
-                    Label("No Request Selected", systemImage: "arrow.left.arrow.right")
-                } description: {
-                    Text("Select a request, or import a Postman collection to get started.")
-                } actions: {
-                    Button("Import Postman Files…") { importingPostman = true }
-                    Button("New Request") { model.newRequestInCurrentCollection() }
-                }
+                detail
+                    .frame(minWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle(model.workspaceName)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Picker("Environment", selection: $model.activeEnvironmentID) {
-                    Text("No Environment").tag(UUID?.none)
-                    ForEach(model.environments) { environment in
-                        Text(environment.name).tag(UUID?.some(environment.id))
-                    }
-                }
-                .frame(minWidth: 160)
-                .help("The environment whose variables fill in {{placeholders}}")
+        .background(Theme.canvas)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if let id = model.selection, model.request(id) != nil {
+            HSplitView {
+                RequestEditorView(requestID: id)
+                    .card()
+                    .padding(.leading, 10)
+                    .padding(.trailing, 5)
+                    .padding(.vertical, 10)
+                    .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+                ResponseView(requestID: id)
+                    .card()
+                    .padding(.leading, 5)
+                    .padding(.trailing, 10)
+                    .padding(.vertical, 10)
+                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.showingEnvironments = true
-                } label: {
-                    Label("Environments", systemImage: "slider.horizontal.3")
-                }
-                .help("Edit environments and global variables")
+            .id(id)
+            .background(Theme.canvas)
+        } else {
+            EmptyState(
+                systemImage: "bolt.horizontal.fill",
+                title: "Nothing selected",
+                detail: "Pick a request from the sidebar, or bring in a Postman collection to get started."
+            ) {
+                Button("Import Postman Files…") { importingPostman = true }
+                    .buttonStyle(PrimaryButtonStyle(large: true))
+                Button("New Request") { model.newRequestInCurrentCollection() }
+                    .buttonStyle(SecondaryButtonStyle(large: true))
             }
-            ToolbarItem(placement: .primaryAction) {
-                Toggle(isOn: $model.hideSecrets) {
-                    Label("Hide Secrets", systemImage: model.hideSecrets ? "eye.slash.fill" : "eye")
-                }
-                .help("Mask tokens, keys and passwords on screen. Requests still send the real values.")
-            }
-            if let session = model.mock {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        model.mockTarget = session.collectionID
-                        model.showingMock = true
-                    } label: {
-                        Label("Mock on port \(String(session.port))", systemImage: "server.rack")
-                            .labelStyle(.titleAndIcon)
-                            .foregroundStyle(.green)
-                    }
-                    .help("The mock server is running. Click to see its routes and requests.")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    importingPostman = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                .help("Import Postman collections and environments")
-            }
+            .background(Theme.canvas)
         }
     }
 
@@ -204,6 +194,9 @@ struct ContentView: View {
                 workspace
             }
         }
+        .foregroundStyle(Theme.text)
+        .tint(Theme.accent)
+        .ignoresSafeArea(.container, edges: .top)
         .fileImporter(isPresented: $importingPostman, allowedContentTypes: [.json, .zip], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { model.importPostmanFiles(urls) }
         }
@@ -213,14 +206,17 @@ struct ContentView: View {
         .sheet(isPresented: $model.showingMock) {
             MockView(collectionID: model.mockTarget)
                 .environment(model)
+                .themedSheet()
         }
         .sheet(item: $model.editingSequence) { reference in
             SequenceEditorView(reference: reference)
                 .environment(model)
+                .themedSheet()
         }
         .sheet(isPresented: $model.showingEnvironments) {
             EnvironmentsView()
                 .environment(model)
+                .themedSheet()
         }
         .sheet(isPresented: Binding(
             get: { model.runner != nil },
@@ -230,9 +226,127 @@ struct ContentView: View {
         )) {
             RunnerView()
                 .environment(model)
+                .themedSheet()
         }
-        .alert(item: $model.notice) { notice in
-            Alert(title: Text(notice.title), message: Text(notice.message), dismissButton: .default(Text("OK")))
+        .sheet(item: $model.notice) { notice in
+            NoticeView(title: notice.title, message: notice.message) { model.notice = nil }
+                .themedSheet()
         }
+    }
+}
+
+/// The custom bar across the top of the window, in place of a standard toolbar.
+struct TopBar: View {
+    @Environment(AppModel.self) private var model
+    @Binding var importingPostman: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Room for the window's close, minimise and zoom buttons.
+            Color.clear.frame(width: 70, height: 1)
+            IconButton(systemImage: "sidebar.left", active: !model.sidebarVisible, help: model.sidebarVisible ? "Hide the sidebar" : "Show the sidebar") {
+                withAnimation(.snappy(duration: 0.2)) { model.sidebarVisible.toggle() }
+            }
+            LogoMark(size: 22)
+            Text("API Playground")
+                .font(.system(size: 13.5, weight: .bold))
+                .foregroundStyle(Theme.text)
+            Text(model.workspaceName)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Theme.raised, in: Capsule())
+                .help(model.vaultURL == nil ? "Working in the Scratch Pad" : "Working in a Local Vault folder")
+
+            Spacer(minLength: 12)
+
+            if let session = model.mock {
+                Button {
+                    model.mockTarget = session.collectionID
+                    model.showingMock = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.success).frame(width: 7, height: 7)
+                            .shadow(color: Theme.success, radius: 4)
+                        Text("Mock :\(String(session.port))")
+                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.success)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.success.opacity(0.12), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("The mock server is running. Click to see its routes and requests.")
+            }
+
+            environmentMenu
+
+            IconButton(systemImage: "slider.horizontal.3", help: "Edit environments and global variables") {
+                model.showingEnvironments = true
+            }
+            IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,
+                       help: "Hide secrets: mask tokens, keys and passwords on screen. Requests still send the real values.") {
+                model.hideSecrets.toggle()
+            }
+            IconButton(systemImage: "square.and.arrow.down", help: "Import Postman collections and environments") {
+                importingPostman = true
+            }
+        }
+        .padding(.trailing, 12)
+        .frame(height: 48)
+        .background(Theme.chrome)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.stroke).frame(height: 1)
+        }
+    }
+
+    private var environmentMenu: some View {
+        Menu {
+            Button {
+                model.activeEnvironmentID = nil
+            } label: {
+                if model.activeEnvironmentID == nil { Label("No Environment", systemImage: "checkmark") } else { Text("No Environment") }
+            }
+            if !model.environments.isEmpty { Divider() }
+            ForEach(model.environments) { environment in
+                Button {
+                    model.activeEnvironmentID = environment.id
+                } label: {
+                    if model.activeEnvironmentID == environment.id {
+                        Label(environment.name, systemImage: "checkmark")
+                    } else {
+                        Text(environment.name)
+                    }
+                }
+            }
+            Divider()
+            Button("Edit Environments…") { model.showingEnvironments = true }
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(model.activeEnvironment == nil ? Theme.textTertiary : Theme.accent)
+                    .frame(width: 7, height: 7)
+                Text(model.activeEnvironment?.name ?? "No Environment")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Theme.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.stroke))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("The environment whose variables fill in {{placeholders}}")
     }
 }

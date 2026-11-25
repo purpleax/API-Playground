@@ -2,21 +2,109 @@ import APIEngine
 import AppKit
 import SwiftUI
 
-/// A monospaced text area backed by NSTextView, which stays fast with large response bodies.
+/// How a code view colours its text.
+enum CodeSyntax {
+    /// JSON, and anything JSON-like: keys, strings, numbers, true/false/null and {{variables}}.
+    case json
+    /// JavaScript, for scripts.
+    case script
+    /// The wire log: sent lines, received lines and notes.
+    case log
+    case plain
+}
+
+/// Colours code in place. It only changes text attributes, so the cursor and undo are unaffected.
+enum Highlighter {
+    private static func regex(_ pattern: String, _ options: NSRegularExpression.Options = []) -> NSRegularExpression {
+        // The patterns are fixed, so a failure here is a programming error.
+        try! NSRegularExpression(pattern: pattern, options: options)
+    }
+
+    private static let punctuation = regex(#"[{}\[\],:]"#)
+    private static let number = regex(#"(?<![\w"'.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w"'])"#)
+    private static let literal = regex(#"\b(?:true|false|null|undefined)\b"#)
+    private static let doubleQuoted = regex(#""(?:[^"\\\n]|\\.)*""#)
+    private static let singleQuoted = regex(#"'(?:[^'\\\n]|\\.)*'"#)
+    private static let template = regex(#"`(?:[^`\\]|\\.)*`"#)
+    private static let variable = regex(#"\{\{[^}\n]+\}\}"#)
+    private static let keyword = regex(#"\b(?:const|let|var|function|return|if|else|for|while|new|typeof|throw|try|catch|of|in)\b"#)
+    private static let comment = regex(#"//[^\n]*"#)
+    private static let logLine = regex(#"^([><*]) .*$"#, [.anchorsMatchLines])
+
+    /// Above this size the text is left one colour, so huge responses stay fast.
+    private static let limit = 400_000
+
+    static func apply(to storage: NSTextStorage, syntax: CodeSyntax, font: NSFont) {
+        let text = storage.string as NSString
+        let whole = NSRange(location: 0, length: text.length)
+        storage.beginEditing()
+        defer { storage.endEditing() }
+        storage.setAttributes([.font: font, .foregroundColor: Theme.Syntax.plain], range: whole)
+        guard syntax != .plain, text.length <= limit else { return }
+
+        func paint(_ expression: NSRegularExpression, _ color: NSColor) {
+            expression.enumerateMatches(in: storage.string, range: whole) { match, _, _ in
+                if let range = match?.range { storage.addAttribute(.foregroundColor, value: color, range: range) }
+            }
+        }
+
+        switch syntax {
+        case .plain:
+            break
+        case .log:
+            logLine.enumerateMatches(in: storage.string, range: whole) { match, _, _ in
+                guard let match else { return }
+                let color: NSColor
+                switch text.substring(with: match.range(at: 1)) {
+                case ">": color = Theme.Syntax.sent
+                case "<": color = Theme.Syntax.received
+                default: color = Theme.Syntax.comment
+                }
+                storage.addAttribute(.foregroundColor, value: color, range: match.range)
+            }
+        case .json, .script:
+            paint(punctuation, Theme.Syntax.punctuation)
+            paint(number, Theme.Syntax.number)
+            paint(literal, Theme.Syntax.keyword)
+            if syntax == .script {
+                paint(keyword, Theme.Syntax.keyword)
+                paint(singleQuoted, Theme.Syntax.string)
+                paint(template, Theme.Syntax.string)
+            }
+            // Strings go on last so numbers and punctuation inside them take the string's colour.
+            doubleQuoted.enumerateMatches(in: storage.string, range: whole) { match, _, _ in
+                guard let range = match?.range else { return }
+                // A string followed by a colon is an object key.
+                var next = range.location + range.length
+                while next < text.length, text.character(at: next) == 0x20 || text.character(at: next) == 0x09 { next += 1 }
+                let isKey = syntax == .json && next < text.length && text.character(at: next) == 0x3A
+                storage.addAttribute(.foregroundColor, value: isKey ? Theme.Syntax.key : Theme.Syntax.string, range: range)
+            }
+            if syntax == .script { paint(comment, Theme.Syntax.comment) }
+            paint(variable, Theme.Syntax.variable)
+        }
+    }
+}
+
+/// A monospaced, syntax-coloured text area backed by NSTextView, which stays fast with large response bodies.
 struct CodeTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable = true
     var fontSize: CGFloat = 12
+    var syntax: CodeSyntax = .json
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
+    }
+
+    fileprivate var font: NSFont {
+        .monospacedSystemFont(ofSize: fontSize, weight: .regular)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         textView.delegate = context.coordinator
-        textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.isEditable = isEditable
         textView.isSelectable = true
         textView.isRichText = false
@@ -29,10 +117,14 @@ struct CodeTextView: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
-        textView.textContainerInset = NSSize(width: 6, height: 8)
+        textView.textContainerInset = NSSize(width: 8, height: 10)
         textView.drawsBackground = false
+        textView.insertionPointColor = NSColor(Theme.accent)
+        textView.selectedTextAttributes = [.backgroundColor: NSColor(Theme.accent).withAlphaComponent(0.28)]
         scrollView.drawsBackground = false
+        scrollView.scrollerStyle = .overlay
         textView.string = text
+        restyle(textView)
         return scrollView
     }
 
@@ -40,12 +132,21 @@ struct CodeTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? NSTextView else { return }
         textView.isEditable = isEditable
-        if textView.font?.pointSize != fontSize {
-            textView.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        }
+        let fontChanged = textView.font?.pointSize != fontSize
         if textView.string != text {
             textView.string = text
+            restyle(textView)
+        } else if fontChanged {
+            restyle(textView)
         }
+    }
+
+    fileprivate func restyle(_ textView: NSTextView) {
+        guard let storage = textView.textStorage else { return }
+        Highlighter.apply(to: storage, syntax: syntax, font: font)
+        textView.font = font
+        // New typing starts plain rather than inheriting the colour beside the cursor.
+        textView.typingAttributes = [.font: font, .foregroundColor: Theme.Syntax.plain]
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -58,6 +159,9 @@ struct CodeTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            if let storage = textView.textStorage {
+                Highlighter.apply(to: storage, syntax: parent.syntax, font: parent.font)
+            }
         }
     }
 }
@@ -66,9 +170,10 @@ struct CodeTextView: NSViewRepresentable {
 struct ReadOnlyCode: View {
     let text: String
     var fontSize: CGFloat = 12
+    var syntax: CodeSyntax = .json
 
     var body: some View {
-        CodeTextView(text: .constant(text), isEditable: false, fontSize: fontSize)
+        CodeTextView(text: .constant(text), isEditable: false, fontSize: fontSize, syntax: syntax)
     }
 }
 
@@ -87,7 +192,7 @@ struct KeyValueEditor: View {
                 HStack(spacing: 6) {
                     Toggle("Enabled", isOn: $item.enabled)
                         .labelsHidden()
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(ThemedCheckboxStyle())
                     TextField(keyTitle, text: $item.key)
                         .frame(minWidth: 90, idealWidth: 160)
                     // A value that is only a {{variable}} reveals nothing, so it stays readable.
@@ -101,10 +206,10 @@ struct KeyValueEditor: View {
                     } label: {
                         Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(GhostButtonStyle())
                     .help("Remove")
                 }
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(ThemedTextFieldStyle())
                 .font(.system(.body, design: .monospaced))
                 .opacity(item.enabled ? 1 : 0.5)
             }
@@ -114,7 +219,7 @@ struct KeyValueEditor: View {
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(GhostButtonStyle())
             }
         }
     }
@@ -132,7 +237,7 @@ struct VariableEditor: View {
                 HStack(spacing: 6) {
                     Toggle("Enabled", isOn: $variable.enabled)
                         .labelsHidden()
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(ThemedCheckboxStyle())
                     TextField("Name", text: $variable.key)
                         .frame(width: 150)
                     if variable.secret {
@@ -155,17 +260,17 @@ struct VariableEditor: View {
                         Image(systemName: variable.secret ? "lock.fill" : "lock.open")
                             .accessibilityLabel("Secret")
                     }
-                    .toggleStyle(.button)
+                    .toggleStyle(PillToggleStyle())
                     .help("Secret values are kept in the Keychain, not in files")
                     Button {
                         variables.removeAll { $0.id == variable.id }
                     } label: {
                         Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(GhostButtonStyle())
                     .help("Remove")
                 }
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(ThemedTextFieldStyle())
                 .font(.system(.body, design: .monospaced))
                 .opacity(variable.enabled ? 1 : 0.5)
             }
@@ -174,7 +279,7 @@ struct VariableEditor: View {
             } label: {
                 Label("Add", systemImage: "plus")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(GhostButtonStyle())
         }
     }
 }
@@ -192,29 +297,50 @@ struct EnvironmentsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                List(selection: $selected) {
-                    Label("Globals", systemImage: "globe").tag(UUID?.none)
-                    Section("Environments") {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        SelectableRow(isSelected: selected == nil) {
+                            selected = nil
+                        } content: {
+                            Image(systemName: "globe").foregroundStyle(Theme.info)
+                            Text("Globals").font(.system(size: 13, weight: .medium))
+                        }
+                        Text("Environments")
+                            .sectionTitle()
+                            .padding(.horizontal, 10)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
                         ForEach(model.environments) { environment in
-                            Text(environment.name).tag(UUID?.some(environment.id))
+                            SelectableRow(isSelected: selected == environment.id) {
+                                selected = environment.id
+                            } content: {
+                                Circle()
+                                    .fill(model.activeEnvironmentID == environment.id ? Theme.accent : Theme.textTertiary)
+                                    .frame(width: 7, height: 7)
+                                Text(environment.name)
+                                    .font(.system(size: 13))
+                                    .lineLimit(1)
+                            }
                         }
                     }
+                    .padding(8)
                 }
-                .frame(minWidth: 170, maxWidth: 240)
+                .frame(minWidth: 180, maxWidth: 240)
+                .background(Theme.chrome)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("A \"This Mac only\" value replaces the shared value here and is never saved to the workspace.")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                         if selected == nil {
-                            Text("Globals").font(.headline)
+                            Text("Globals").font(.system(size: 17, weight: .bold))
                             Text("Available to every request. A collection or environment variable with the same name wins.")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                             VariableEditor(variables: $globalsDraft, hidesSecrets: model.secretsHidden)
                         } else {
                             TextField("Environment name", text: $draft.name)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(ThemedTextFieldStyle())
                                 .font(.headline)
                             VariableEditor(variables: $draft.variables, hidesSecrets: model.secretsHidden)
                         }
@@ -246,7 +372,8 @@ struct EnvironmentsView: View {
                     commit()
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
+                .buttonStyle(PrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(12)
         }

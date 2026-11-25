@@ -14,10 +14,10 @@ struct MockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Mock Server").font(.title3.weight(.semibold))
+                Text("Mock Server").font(.system(size: 17, weight: .bold))
                 if let session = model.mock {
                     HStack(spacing: 8) {
-                        Image(systemName: "circle.fill").foregroundStyle(.green).font(.caption)
+                        Image(systemName: "circle.fill").foregroundStyle(Theme.success).font(.caption)
                         Text("Serving \"\(session.collectionName)\" at")
                         Text(session.url)
                             .font(.system(.body, design: .monospaced))
@@ -28,19 +28,19 @@ struct MockView: View {
                         } label: {
                             Image(systemName: "doc.on.doc")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(GhostButtonStyle())
                         .help("Copy the address")
                     }
                     if let variable = session.baseVariable {
                         Text("Requests that start with {{\(variable)}} now go to the mock, through a temporary environment that is removed when the mock stops.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     } else {
                         Text("This collection's URLs do not start with a shared variable, so point requests at the address above yourself.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 } else {
                     Text("Answers requests on this Mac with each request's pinned responses, so a demo needs no backend and no network.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
             .padding(14)
@@ -65,10 +65,11 @@ struct MockView: View {
                     Button("Stop Mock") { model.stopMock() }
                 } else if let collectionID {
                     Button("Start Mock") { model.startMock(collectionID: collectionID) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(PrimaryButtonStyle())
                 }
                 Spacer()
                 Button("Done") { dismiss() }
+                    .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }
             .padding(12)
@@ -78,7 +79,7 @@ struct MockView: View {
 
     private func routeList(_ routes: [MockRoute]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Routes").font(.headline).padding(.horizontal, 12).padding(.vertical, 8)
+            Text("Routes").sectionTitle().padding(.horizontal, 12).padding(.vertical, 8)
             List(routes) { route in
                 HStack(spacing: 8) {
                     MethodBadge(method: route.method)
@@ -87,24 +88,24 @@ struct MockView: View {
                             .font(.system(.body, design: .monospaced))
                         Text(route.name)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     if route.examples.isEmpty {
                         Label("Nothing pinned", systemImage: "exclamationmark.triangle")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Theme.warning)
                             .help("Send this request once and pin the response, or the mock answers 501.")
                     } else {
                         Text(route.examples.count == 1 ? "1 response" : "\(route.examples.count) responses")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
             }
             .overlay {
                 if routes.isEmpty {
-                    Text("This collection has no requests.").foregroundStyle(.secondary)
+                    Text("This collection has no requests.").foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -112,7 +113,7 @@ struct MockView: View {
 
     private func hitList(_ hits: [MockHit]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Requests received").font(.headline).padding(.horizontal, 12).padding(.vertical, 8)
+            Text("Requests received").sectionTitle().padding(.horizontal, 12).padding(.vertical, 8)
             List(hits) { hit in
                 HStack(spacing: 8) {
                     Text("\(hit.status)")
@@ -125,12 +126,12 @@ struct MockView: View {
                     Spacer()
                     Text(hit.date.formatted(date: .omitted, time: .standard))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
             .overlay {
                 if hits.isEmpty {
-                    Text("Nothing yet").foregroundStyle(.secondary)
+                    Text("Nothing yet").foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -155,7 +156,7 @@ struct SequenceEditorView: View {
                     .textFieldStyle(.plain)
                     .font(.title3.weight(.semibold))
                 Text("While presenting, each step shows its note and sends its request when you press Space.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             .padding(14)
             Divider()
@@ -169,7 +170,7 @@ struct SequenceEditorView: View {
                                 .frame(width: 22, alignment: .trailing)
                                 .padding(.top, 3)
                             VStack(alignment: .leading, spacing: 4) {
-                                Picker("Request", selection: Binding(
+                                MenuPicker(title: requests.first { $0.id == step.requestID }.map { "\($0.method) \($0.name)" } ?? "Choose a request", selection: Binding(
                                     get: { step.requestID },
                                     set: { sequence.wrappedValue.steps[index].requestID = $0 }
                                 )) {
@@ -182,7 +183,7 @@ struct SequenceEditorView: View {
                                     get: { step.note },
                                     set: { sequence.wrappedValue.steps[index].note = $0 }
                                 ), axis: .vertical)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(ThemedTextFieldStyle())
                                 .lineLimit(1...4)
                             }
                             VStack(spacing: 2) {
@@ -201,13 +202,13 @@ struct SequenceEditorView: View {
                                 .disabled(index == sequence.wrappedValue.steps.count - 1)
                                 .help("Move down")
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(GhostButtonStyle())
                             Button {
                                 sequence.wrappedValue.steps.remove(at: index)
                             } label: {
                                 Image(systemName: "minus.circle")
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(GhostButtonStyle())
                             .help("Remove this step")
                             .padding(.top, 3)
                         }
@@ -219,7 +220,7 @@ struct SequenceEditorView: View {
                     } label: {
                         Label("Add Step", systemImage: "plus")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(GhostButtonStyle())
                     .disabled(requests.isEmpty)
                 }
                 .padding(14)
@@ -233,6 +234,7 @@ struct SequenceEditorView: View {
                 Button("Present") { model.present(reference) }
                     .disabled(sequence.wrappedValue.steps.isEmpty)
                 Button("Done") { model.editingSequence = nil }
+                    .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }
             .padding(12)
@@ -256,33 +258,37 @@ struct PresentationView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(state.title)
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                     if state.steps.count > 1 {
                         Text("Step \(state.index + 1) of \(state.steps.count)")
                             .font(.title3.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     Label("Secrets hidden", systemImage: "eye.slash")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                     Button("Exit") { model.stopPresenting() }
                     }
                 .padding(.horizontal, 28)
-                .padding(.top, 18)
+                .padding(.top, 34)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(request.name)
-                        .font(.system(size: 34, weight: .bold))
+                        .font(.system(size: 38, weight: .heavy))
+                        .foregroundStyle(Theme.text)
                     if !step.note.isEmpty {
                         Text(step.note)
                             .font(.system(size: 20))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(request.method.uppercased())
-                            .font(.system(size: 20, weight: .bold, design: .monospaced))
-                            .foregroundStyle(MethodBadge.color(request.method))
+                            .font(.system(size: 17, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(Theme.method(request.method))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Theme.method(request.method).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
                         Text(redactor.url(model.preview(request.id)?.url ?? request.url))
                             .font(.system(size: 20, design: .monospaced))
                             .textSelection(.enabled)
@@ -307,7 +313,17 @@ struct PresentationView: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 12)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .buttonStyle(SecondaryButtonStyle(large: true))
+            .foregroundStyle(Theme.text)
+            .background {
+                ZStack {
+                    Theme.canvas
+                    // A soft glow in two corners, in the signature colours.
+                    RadialGradient(colors: [Theme.accent.opacity(0.16), .clear], center: .topLeading, startRadius: 0, endRadius: 620)
+                    RadialGradient(colors: [Theme.accentAlt.opacity(0.14), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 700)
+                }
+                .ignoresSafeArea()
+            }
             .onAppear { installKeyHandler() }
             .onDisappear { removeKeyHandler() }
         }
@@ -355,7 +371,7 @@ struct PresentationView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Request body")
                 .font(.headline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
                 .padding(.horizontal, 28)
                 .padding(.vertical, 10)
             let prepared = model.preview(request.id)
@@ -365,7 +381,7 @@ struct PresentationView: View {
             } else {
                 Text("None")
                     .font(.system(size: 18))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
                     .padding(.horizontal, 28)
                 Spacer()
             }
@@ -379,26 +395,26 @@ struct PresentationView: View {
             HStack(spacing: 10) {
                 Text("Response")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 if case .finished(let result) = model.responses[request.id], let response = result.response {
                     Text("\(response.status) \(response.statusText)")
                         .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 3)
-                        .background(ResponseView.statusColor(response.status), in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(ResponseView.statusColor(response.status))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(ResponseView.statusColor(response.status).opacity(0.16), in: Capsule())
                     if let name = model.pinnedShown[request.id] {
                         Label("Pinned: \(name)", systemImage: "pin.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Theme.warning)
                     } else {
                         Text(ResponseView.duration(response.timings.total))
                             .font(.system(size: 16, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                         if !result.tests.isEmpty {
                             let failed = result.failedTests.count
                             Label(failed == 0 ? (result.tests.count == 1 ? "1 test passed" : "\(result.tests.count) tests passed") : "\(failed) of \(result.tests.count) tests failed",
                                   systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(failed == 0 ? Color.green : Color.red)
+                                .foregroundStyle(failed == 0 ? Theme.success : Theme.danger)
                         }
                     }
                 }
@@ -437,7 +453,7 @@ struct PresentationView: View {
             Spacer()
             Text(text)
                 .font(.system(size: 20))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.textTertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
             Spacer()
@@ -459,7 +475,7 @@ struct PresentationView: View {
             } label: {
                 Label("Send", systemImage: "paperplane.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PrimaryButtonStyle(large: true))
 
             if let example = request.examples.first {
                 Button {
@@ -479,8 +495,7 @@ struct PresentationView: View {
 
             Spacer()
             Text("Space sends · ← → move · P shows the pinned response · Esc exits")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         }
-        .controlSize(.large)
     }
 }

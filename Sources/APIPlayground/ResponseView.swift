@@ -19,27 +19,24 @@ struct ResponseView: View {
         let redactor = model.redactor(for: requestID)
         VStack(alignment: .leading, spacing: 0) {
             statusBar(result)
-                .frame(height: 30)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
+                .frame(height: 32)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
 
-            Picker("Section", selection: $tab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(title(tab, result)).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(12)
-
-            Divider()
+            ThemedTabBar(tabs: Tab.allCases.map { tabItem($0, result) }, selection: $tab)
 
             if tab == .history {
                 HistoryView(requestID: requestID, current: result?.response, redactor: redactor)
             } else if case .sending = state {
-                VStack {
+                VStack(spacing: 12) {
                     Spacer()
-                    ProgressView("Sending…")
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Theme.accent)
+                    Text("Sending…")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
@@ -68,16 +65,21 @@ struct ResponseView: View {
         return nil
     }
 
-    private func title(_ tab: Tab, _ result: RequestRunResult?) -> String {
-        guard let result else { return tab.rawValue }
+    private func tabItem(_ tab: Tab, _ result: RequestRunResult?) -> TabItem<Tab> {
+        guard let result else { return TabItem(id: tab, title: tab.rawValue) }
         switch tab {
         case .headers:
-            return result.response.map { "Headers (\($0.headers.count))" } ?? tab.rawValue
+            return TabItem(id: tab, title: tab.rawValue, badge: result.response.map { String($0.headers.count) })
         case .tests:
-            if result.tests.isEmpty { return result.scriptError == nil ? "Tests" : "Tests !" }
-            return "Tests (\(result.tests.count - result.failedTests.count)/\(result.tests.count))"
+            let failed = result.failedTests.count + (result.scriptError == nil ? 0 : 1)
+            if result.tests.isEmpty && failed == 0 { return TabItem(id: tab, title: tab.rawValue) }
+            return TabItem(
+                id: tab, title: tab.rawValue,
+                badge: "\(result.tests.count - result.failedTests.count)/\(result.tests.count)",
+                badgeColor: failed == 0 ? Theme.success : Theme.danger
+            )
         default:
-            return tab.rawValue
+            return TabItem(id: tab, title: tab.rawValue)
         }
     }
 
@@ -85,16 +87,28 @@ struct ResponseView: View {
     private func statusBar(_ result: RequestRunResult?) -> some View {
         if let result, let response = result.response {
             HStack(spacing: 8) {
-                Text("\(response.status) \(response.statusText)")
-                    .font(.system(.body, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Self.statusColor(response.status), in: RoundedRectangle(cornerRadius: 5))
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Self.statusColor(response.status))
+                        .frame(width: 7, height: 7)
+                        .shadow(color: Self.statusColor(response.status), radius: 4)
+                    Text("\(response.status) \(response.statusText)".trimmingCharacters(in: .whitespaces))
+                        .font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Self.statusColor(response.status))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Self.statusColor(response.status).opacity(0.14), in: Capsule())
+                .fixedSize()
                 pill(ByteCountFormatter.string(fromByteCount: Int64(response.body.count), countStyle: .file))
                 if let name = model.pinnedShown[requestID] {
                     Label("Pinned: \(name)", systemImage: "pin.fill")
-                        .foregroundStyle(.orange)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Theme.warning)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Theme.warning.opacity(0.13), in: Capsule())
+                        .lineLimit(1)
                         .help("This is a saved response, not a live one. Send the request to replace it.")
                 } else {
                     pill(Self.duration(response.timings.total))
@@ -103,25 +117,24 @@ struct ResponseView: View {
                 if !result.tests.isEmpty || result.scriptError != nil {
                     let failed = result.failedTests.count + (result.scriptError == nil ? 0 : 1)
                     Label(failed == 0 ? "Passed" : "\(failed) failed", systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(failed == 0 ? Color.green : Color.red)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(failed == 0 ? Theme.success : Theme.danger)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 Spacer()
                 if model.pinnedShown[requestID] == nil {
-                    Button {
+                    IconButton(systemImage: "pin", help: "Pin this response: keep it with the request to show again or serve from a mock") {
                         model.pinResponse(requestID)
-                    } label: {
-                        Image(systemName: "pin")
                     }
-                    .buttonStyle(.borderless)
-                    .help("Pin this response: keep it with the request to show again or serve from a mock")
                 }
                 pinnedMenu
             }
         } else {
             HStack {
                 Text("Response")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Theme.textTertiary)
                 Spacer()
                 pinnedMenu
             }
@@ -144,9 +157,19 @@ struct ResponseView: View {
                     }
                 }
             } label: {
-                Label("\(examples.count)", systemImage: "pin.fill")
+                HStack(spacing: 4) {
+                    Image(systemName: "pin.fill").font(.system(size: 10))
+                    Text("\(examples.count)").font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(Theme.warning)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Theme.warning.opacity(0.13), in: Capsule())
+                .contentShape(Capsule())
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
             .fixedSize()
             .help("Pinned responses")
         }
@@ -154,18 +177,17 @@ struct ResponseView: View {
 
     private func pill(_ text: String) -> some View {
         Text(text)
-            .font(.system(.callout, design: .monospaced))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Theme.raised, in: Capsule())
+            .lineLimit(1)
+            .fixedSize()
     }
 
     private func placeholder(_ title: String, systemImage: String, detail: String) -> some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            Text(detail)
-        }
+        EmptyState(systemImage: systemImage, title: title, detail: detail)
     }
 
     @ViewBuilder
@@ -176,21 +198,26 @@ struct ResponseView: View {
                 if !prepared.unresolved.isEmpty {
                     Label("No value for: \(prepared.unresolved.joined(separator: ", ")). The {{placeholders}} were sent as written.",
                           systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.warning)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                    Divider()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.warning.opacity(0.10))
                 }
                 if response.body.isEmpty {
                     placeholder("Empty body", systemImage: "doc", detail: "The server sent no content.")
                 } else if let text = response.text {
                     let formatted = LineDiff.prettyJSON(response.body)
                     if formatted != nil {
-                        Toggle("Format JSON", isOn: $pretty)
-                            .toggleStyle(.checkbox)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                        Divider()
+                        HStack {
+                            Spacer()
+                            Toggle(isOn: $pretty) { Text("Format") }
+                                .toggleStyle(PillToggleStyle())
+                                .help("Indent the JSON for reading")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
                     }
                     let shown = pretty ? (formatted ?? text) : text
                     ReadOnlyCode(text: redactor?.redact(shown) ?? shown)
@@ -199,39 +226,40 @@ struct ResponseView: View {
                 }
             }
         case .headers:
-            Table(response.headers.enumerated().map { HeaderRow(id: $0.offset, header: $0.element) }) {
-                TableColumn("Name") { Text($0.header.name).textSelection(.enabled) }
-                    .width(min: 120, ideal: 220)
-                TableColumn("Value") { row in
-                    Text(redactor?.header(name: row.header.name, value: row.header.value) ?? row.header.value)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(response.headers.enumerated()), id: \.offset) { index, header in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(header.name)
+                                .foregroundStyle(Theme.Syntax.key.color)
+                                .frame(width: 210, alignment: .leading)
+                            Text(redactor?.header(name: header.name, value: header.value) ?? header.value)
+                                .foregroundStyle(Theme.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .font(.system(size: 12, design: .monospaced))
                         .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(index.isMultiple(of: 2) ? Color.clear : Theme.raised.opacity(0.45))
+                    }
                 }
+                .padding(.vertical, 6)
             }
-            .font(.system(.body, design: .monospaced))
         case .timing:
             ScrollView {
                 TimingView(timings: response.timings, remoteAddress: response.remoteAddress)
                     .padding(12)
             }
         case .log:
-            ReadOnlyCode(text: Self.logText(response.wireLog, redactor: redactor))
+            ReadOnlyCode(text: Self.logText(response.wireLog, redactor: redactor), syntax: .log)
         case .tests, .history:
             EmptyView()
         }
     }
 
-    private struct HeaderRow: Identifiable {
-        let id: Int
-        let header: HTTPHeader
-    }
-
     static func statusColor(_ status: Int) -> Color {
-        switch status {
-        case 200..<300: return .green
-        case 300..<400: return .blue
-        case 400..<500: return .orange
-        default: return .red
-        }
+        Theme.status(status)
     }
 
     static func duration(_ seconds: Double) -> String {
@@ -260,7 +288,7 @@ struct TimingView: View {
     let timings: HTTPTimings
     let remoteAddress: String?
 
-    private static let colors: [Color] = [.teal, .orange, .purple, .blue, .green, .pink]
+    private static let colors: [Color] = [Theme.info, Theme.warning, Theme.violet, Theme.accentAlt, Theme.success, Theme.danger]
 
     var body: some View {
         let phases = timings.phases
@@ -273,12 +301,16 @@ struct TimingView: View {
                     Text(phase.name)
                         .frame(width: 80, alignment: .leading)
                     GeometryReader { geometry in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Self.colors[index % Self.colors.count])
-                            .frame(width: max(2, geometry.size.width * phase.seconds / scale))
-                            .offset(x: geometry.size.width * start / scale)
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Theme.raised)
+                            Capsule()
+                                .fill(Self.colors[index % Self.colors.count])
+                                .shadow(color: Self.colors[index % Self.colors.count].opacity(0.5), radius: 4)
+                                .frame(width: max(4, geometry.size.width * phase.seconds / scale))
+                                .offset(x: min(geometry.size.width - 4, geometry.size.width * start / scale))
+                        }
                     }
-                    .frame(height: 14)
+                    .frame(height: 10)
                     Text(ResponseView.duration(phase.seconds))
                         .font(.system(.body, design: .monospaced))
                         .frame(width: 80, alignment: .trailing)
@@ -318,24 +350,29 @@ struct HistoryView: View {
 
     var body: some View {
         VSplitView {
-            List(entries, selection: $selected) { entry in
-                HStack {
-                    Text("\(entry.status)")
-                        .font(.system(.body, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(ResponseView.statusColor(entry.status))
-                    Text(entry.date.formatted(date: .abbreviated, time: .standard))
-                    Spacer()
-                    Text(ResponseView.duration(entry.timings.total))
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(entries) { entry in
+                        SelectableRow(isSelected: selected == entry.id) {
+                            selected = entry.id
+                        } content: {
+                            Chip(text: "\(entry.status)", color: ResponseView.statusColor(entry.status))
+                            Text(entry.date.formatted(date: .abbreviated, time: .standard))
+                                .font(.system(size: 12.5))
+                            Spacer()
+                            Text(ResponseView.duration(entry.timings.total))
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
                 }
-                .tag(entry.id)
+                .padding(8)
             }
             .frame(minHeight: 90, idealHeight: 150)
             .overlay {
                 if entries.isEmpty {
                     Text("No past responses yet")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
             }
 
@@ -359,7 +396,7 @@ struct HistoryView: View {
                     Text(lines.allSatisfy { $0.kind == .same }
                          ? "Identical to \(newer.label)."
                          : "Changes from this response to \(newer.label):")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                     Divider()
@@ -370,7 +407,7 @@ struct HistoryView: View {
             VStack {
                 Spacer()
                 Text("Select a past response to compare it with the current one.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity)
@@ -417,8 +454,8 @@ struct DiffView: View {
     private func background(_ kind: DiffLine.Kind) -> Color {
         switch kind {
         case .same: return .clear
-        case .added: return .green.opacity(0.18)
-        case .removed: return .red.opacity(0.18)
+        case .added: return Theme.success.opacity(0.16)
+        case .removed: return Theme.danger.opacity(0.16)
         }
     }
 }

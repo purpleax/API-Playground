@@ -27,52 +27,75 @@ struct RequestEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Request name", text: request.name)
                 .textFieldStyle(.plain)
-                .font(.title3.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
 
-            HStack(spacing: 8) {
-                Picker("Method", selection: request.method) {
-                    ForEach(methodChoices(request.wrappedValue.method), id: \.self) { method in
-                        Text(method).tag(method)
+            // The command bar: method, address and Send in one rounded strip.
+            HStack(spacing: 0) {
+                let method = request.wrappedValue.method.uppercased()
+                Menu {
+                    ForEach(methodChoices(request.wrappedValue.method), id: \.self) { choice in
+                        Button(choice) { request.wrappedValue.method = choice }
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(method)
+                            .font(.system(size: 12.5, weight: .heavy, design: .monospaced))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.method(method))
+                    .padding(.horizontal, 13)
+                    .frame(height: 40)
+                    .background(Theme.method(method).opacity(0.13))
+                    .contentShape(Rectangle())
                 }
-                .labelsHidden()
-                .frame(width: 104)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("HTTP method")
+
+                Rectangle().fill(Theme.stroke).frame(width: 1)
 
                 TextField("https://api.example.com/path", text: request.url)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 12)
                     .onSubmit { model.send(requestID) }
 
-                Button("Send") { model.send(requestID) }
-                    .buttonStyle(.borderedProminent)
-                    .help("Send the request (⌘↩)")
-            }
-            .padding(12)
-
-            Picker("Section", selection: $tab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(title(tab, request.wrappedValue)).tag(tab)
+                Button {
+                    model.send(requestID)
+                } label: {
+                    Label("Send", systemImage: "paperplane.fill")
                 }
+                .buttonStyle(PrimaryButtonStyle())
+                .padding(.trailing, 6)
+                .help("Send the request (⌘↩)")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+            .frame(height: 40)
+            .background(Theme.raised)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.stroke))
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
 
-            Divider()
+            ThemedTabBar(tabs: Tab.allCases.map { tabItem($0, request.wrappedValue) }, selection: $tab)
 
             switch tab {
             case .params:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Query parameters").font(.headline)
+                        Text("Query parameters").sectionTitle()
                         KeyValueEditor(items: request.params, hidesSecrets: model.secretsHidden)
                         if !request.wrappedValue.pathVariables.isEmpty {
-                            Text("Path variables").font(.headline)
+                            Text("Path variables").sectionTitle()
                             Text("Each replaces the matching :name part of the URL.")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                             KeyValueEditor(items: request.pathVariables, allowsAdding: false)
                         }
                     }
@@ -110,21 +133,22 @@ struct RequestEditorView: View {
         Self.methods.contains(current) ? Self.methods : Self.methods + [current]
     }
 
-    private func title(_ tab: Tab, _ request: RequestItem) -> String {
+    private func tabItem(_ tab: Tab, _ request: RequestItem) -> TabItem<Tab> {
+        func count(_ number: Int) -> String? { number > 0 ? String(number) : nil }
         switch tab {
         case .params:
-            let count = request.params.filter(\.enabled).count
-            return count > 0 ? "Params (\(count))" : "Params"
+            return TabItem(id: tab, title: tab.rawValue, badge: count(request.params.filter(\.enabled).count))
         case .headers:
-            let count = request.headers.filter(\.enabled).count
-            return count > 0 ? "Headers (\(count))" : "Headers"
+            return TabItem(id: tab, title: tab.rawValue, badge: count(request.headers.filter(\.enabled).count))
+        case .body:
+            return TabItem(id: tab, title: tab.rawValue, badge: request.body == .none ? nil : "•")
         case .tests:
-            let count = request.assertions.filter(\.enabled).count
-            return count > 0 ? "Tests (\(count))" : "Tests"
+            return TabItem(id: tab, title: tab.rawValue, badge: count(request.assertions.filter(\.enabled).count))
         case .scripts:
-            return request.preRequestScript.isEmpty && request.testScript.isEmpty ? "Scripts" : "Scripts •"
+            let hasScripts = !request.preRequestScript.isEmpty || !request.testScript.isEmpty
+            return TabItem(id: tab, title: tab.rawValue, badge: hasScripts ? "JS" : nil, badgeColor: hasScripts ? Theme.warning : nil)
         default:
-            return tab.rawValue
+            return TabItem(id: tab, title: tab.rawValue)
         }
     }
 }
@@ -169,7 +193,7 @@ private struct BodyEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Picker("Body type", selection: Binding(
+                MenuPicker(title: BodyKind(requestBody).rawValue, selection: Binding(
                     get: { BodyKind(requestBody) },
                     set: { kind in
                         if kind != BodyKind(requestBody) { requestBody = kind.empty }
@@ -183,7 +207,7 @@ private struct BodyEditor: View {
                 .fixedSize()
 
                 if case .raw(let text, let contentType) = requestBody {
-                    Picker("Content type", selection: Binding(
+                    MenuPicker(title: Self.choices(including: contentType).first { $0.value == contentType }?.label ?? "Content type", selection: Binding(
                         get: { contentType },
                         set: { requestBody = .raw(text: text, contentType: $0) }
                     )) {
@@ -201,7 +225,7 @@ private struct BodyEditor: View {
             switch requestBody {
             case .none:
                 Text("This request has no body.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 12)
                 Spacer()
             case .raw(let text, let contentType):
@@ -232,7 +256,7 @@ private struct BodyEditor: View {
                 Divider()
                 VSplitView {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Query").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 6)
+                        Text("Query").font(.caption).foregroundStyle(Theme.textSecondary).padding(.horizontal, 12).padding(.top, 6)
                         CodeTextView(text: Binding(
                             get: { query },
                             set: { requestBody = .graphQL(query: $0, variables: variables) }
@@ -240,7 +264,7 @@ private struct BodyEditor: View {
                     }
                     .frame(minHeight: 80)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Variables (JSON)").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 6)
+                        Text("Variables (JSON)").font(.caption).foregroundStyle(Theme.textSecondary).padding(.horizontal, 12).padding(.top, 6)
                         CodeTextView(text: Binding(
                             get: { variables },
                             set: { requestBody = .graphQL(query: query, variables: $0) }
@@ -254,7 +278,7 @@ private struct BodyEditor: View {
                         get: { path },
                         set: { requestBody = .file(path: $0) }
                     ))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(ThemedTextFieldStyle())
                     .font(.system(.body, design: .monospaced))
                     Button("Choose…") {
                         let panel = NSOpenPanel()
@@ -286,22 +310,22 @@ private struct FormFieldEditor: View {
                 HStack(spacing: 6) {
                     Toggle("Enabled", isOn: $field.enabled)
                         .labelsHidden()
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(ThemedCheckboxStyle())
                     TextField("Name", text: $field.key)
                         .frame(minWidth: 90, idealWidth: 160)
                     TextField(field.isFile ? "Path to file" : "Value", text: $field.value)
                     Toggle("File", isOn: $field.isFile)
-                        .toggleStyle(.button)
+                        .toggleStyle(PillToggleStyle())
                         .help("Send the contents of a file")
                     Button {
                         fields.removeAll { $0.id == field.id }
                     } label: {
                         Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(GhostButtonStyle())
                     .help("Remove")
                 }
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(ThemedTextFieldStyle())
                 .font(.system(.body, design: .monospaced))
                 .opacity(field.enabled ? 1 : 0.5)
             }
@@ -310,7 +334,7 @@ private struct FormFieldEditor: View {
             } label: {
                 Label("Add", systemImage: "plus")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(GhostButtonStyle())
         }
     }
 }
@@ -361,7 +385,7 @@ private struct AuthEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Type", selection: Binding(
+            MenuPicker(title: AuthKind(auth).rawValue, selection: Binding(
                 get: { AuthKind(auth) },
                 set: { kind in
                     if kind != AuthKind(auth) { auth = kind.empty }
@@ -376,10 +400,10 @@ private struct AuthEditor: View {
             switch auth {
             case .inherit:
                 Text("Uses the parent's setting: \(Self.summary(inherited)).")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             case .none:
                 Text("No auth is sent with this request.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             case .basic(let username, let password):
                 Form {
                     TextField("Username", text: Binding(get: { username }, set: { auth = .basic(username: $0, password: password) }))
@@ -393,7 +417,7 @@ private struct AuthEditor: View {
                 Form {
                     TextField("Name", text: Binding(get: { key }, set: { auth = .apiKey(key: $0, value: value, placement: placement) }))
                     secretField("Value", Binding(get: { value }, set: { auth = .apiKey(key: key, value: $0, placement: placement) }))
-                    Picker("Send in", selection: Binding(get: { placement }, set: { auth = .apiKey(key: key, value: value, placement: $0) })) {
+                    MenuPicker(title: placement == .header ? "Send in a header" : "Send in a query parameter", selection: Binding(get: { placement }, set: { auth = .apiKey(key: key, value: value, placement: $0) })) {
                         Text("Header").tag(APIKeyPlacement.header)
                         Text("Query parameter").tag(APIKeyPlacement.query)
                     }
@@ -402,10 +426,11 @@ private struct AuthEditor: View {
             if auth != .inherit, auth != Auth.none {
                 Text("Use a {{variable}} for the secret part and mark that variable as secret, so it stays out of files.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
         .font(.system(.body, design: .monospaced))
+        .textFieldStyle(ThemedTextFieldStyle())
     }
 
     static func summary(_ auth: Auth) -> String {
@@ -429,7 +454,7 @@ private struct ScriptsEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Scripts are JavaScript and use Postman's pm object. Collection and folder scripts run first.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
                 .padding(12)
             Divider()
             VSplitView {
@@ -441,7 +466,7 @@ private struct ScriptsEditor: View {
 
     private func section(_ title: String, _ text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 6)
+            Text(title).font(.caption).foregroundStyle(Theme.textSecondary).padding(.horizontal, 12).padding(.top, 6)
             CodeTextView(text: text)
         }
         .frame(minHeight: 80)

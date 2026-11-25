@@ -94,6 +94,14 @@ final class AppModel {
     var showingEnvironments = false
     var runner: RunnerSession?
 
+    var appearance = AppAppearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .dark {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
+            appearance.apply()
+        }
+    }
+    var sidebarVisible = true
+
     /// Masks secrets everywhere they are displayed. Requests are still sent with real values.
     var hideSecrets = UserDefaults.standard.bool(forKey: "hideSecrets") {
         didSet { UserDefaults.standard.set(hideSecrets, forKey: "hideSecrets") }

@@ -26,7 +26,7 @@ private struct SourcePicker: View {
     @Binding var source: ValueSource
 
     var body: some View {
-        Picker("Read from", selection: $source.kind) {
+        MenuPicker(title: source.kind.title, selection: $source.kind) {
             ForEach(ValueSource.Kind.allCases, id: \.self) { kind in
                 Text(kind.title).tag(kind)
             }
@@ -47,17 +47,17 @@ struct TestsEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Checks").font(.headline)
+            Text("Checks").sectionTitle()
             Text("Each check runs against the response and shows as a test result.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach($assertions) { $assertion in
                     HStack(spacing: 6) {
                         Toggle("Enabled", isOn: $assertion.enabled)
                             .labelsHidden()
-                            .toggleStyle(.checkbox)
+                            .toggleStyle(ThemedCheckboxStyle())
                         SourcePicker(source: $assertion.source)
-                        Picker("Comparison", selection: $assertion.op) {
+                        MenuPicker(title: assertion.op.label, selection: $assertion.op) {
                             ForEach(AssertionOperator.allCases, id: \.self) { op in
                                 Text(op.label).tag(op)
                             }
@@ -74,10 +74,10 @@ struct TestsEditor: View {
                         } label: {
                             Image(systemName: "minus.circle")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(GhostButtonStyle())
                         .help("Remove")
                     }
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(ThemedTextFieldStyle())
                     .font(.system(.body, design: .monospaced))
                     .opacity(assertion.enabled ? 1 : 0.5)
                 }
@@ -86,24 +86,24 @@ struct TestsEditor: View {
                 } label: {
                     Label("Add Check", systemImage: "plus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(GhostButtonStyle())
             }
 
-            Text("Save from response").font(.headline)
+            Text("Save from response").sectionTitle()
             Text("Copies a value into a variable, so the next request can use it as {{name}}.")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach($extractions) { $extraction in
                     HStack(spacing: 6) {
                         Toggle("Enabled", isOn: $extraction.enabled)
                             .labelsHidden()
-                            .toggleStyle(.checkbox)
+                            .toggleStyle(ThemedCheckboxStyle())
                         SourcePicker(source: $extraction.source)
                         Image(systemName: "arrow.right")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                         TextField("Variable name", text: $extraction.variable)
                             .frame(minWidth: 90)
-                        Picker("Scope", selection: $extraction.scope) {
+                        MenuPicker(title: extraction.scope.label, selection: $extraction.scope) {
                             ForEach(VariableScopeKind.allCases, id: \.self) { scope in
                                 Text(scope.label).tag(scope)
                             }
@@ -116,10 +116,10 @@ struct TestsEditor: View {
                         } label: {
                             Image(systemName: "minus.circle")
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(GhostButtonStyle())
                         .help("Remove")
                     }
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(ThemedTextFieldStyle())
                     .font(.system(.body, design: .monospaced))
                     .opacity(extraction.enabled ? 1 : 0.5)
                 }
@@ -128,7 +128,7 @@ struct TestsEditor: View {
                 } label: {
                     Label("Add Saved Value", systemImage: "plus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(GhostButtonStyle())
             }
         }
     }
@@ -147,37 +147,37 @@ struct TestResultsView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let error = result.error {
                 Label(shown(error), systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.danger)
             }
             if let error = result.scriptError {
                 Label("Script error: \(shown(error))", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.danger)
             }
             if result.skipped {
                 Label("A pre-request script skipped this request.", systemImage: "forward.end")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             if result.tests.isEmpty && result.error == nil && result.scriptError == nil && !result.skipped {
                 Text("This request has no checks or test scripts. Add them in the request's Tests and Scripts tabs.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             ForEach(Array(result.tests.enumerated()), id: \.offset) { _, test in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: test.skipped ? "minus.circle" : (test.passed ? "checkmark.circle.fill" : "xmark.circle.fill"))
-                        .foregroundStyle(test.skipped ? Color.secondary : (test.passed ? Color.green : Color.red))
+                        .foregroundStyle(test.skipped ? Color.secondary : (test.passed ? Theme.success : Theme.danger))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(shown(test.name))
                         if let message = test.message {
                             Text(shown(message))
                                 .font(.system(.callout, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }
             }
             if !result.logs.isEmpty {
                 Divider()
-                Text("Console").font(.headline)
+                Text("Console").sectionTitle()
                 Text(shown(result.logs.joined(separator: "\n")))
                     .font(.system(.callout, design: .monospaced))
                     .textSelection(.enabled)
@@ -199,7 +199,7 @@ struct RunnerView: View {
                     Text("Run: \(session.title)")
                         .font(.title3.weight(.semibold))
                     Text(summary(session))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 .padding(14)
                 Divider()
@@ -219,7 +219,7 @@ struct RunnerView: View {
                                         .foregroundStyle(ResponseView.statusColor(response.status))
                                     Text(ResponseView.duration(response.timings.total))
                                         .font(.system(.body, design: .monospaced))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Theme.textSecondary)
                                         .frame(width: 70, alignment: .trailing)
                                 }
                                 if !result.tests.isEmpty {
@@ -232,7 +232,7 @@ struct RunnerView: View {
                                 model.selection = row.id
                                 model.closeRunner()
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(GhostButtonStyle())
                             .help("Close the run and show this request")
                         }
                         if let result = row.result, !result.passed {
@@ -245,7 +245,7 @@ struct RunnerView: View {
                 .overlay {
                     if session.rows.isEmpty {
                         Text("There are no requests to run here.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                     }
                 }
 
@@ -263,7 +263,8 @@ struct RunnerView: View {
                     }
                     Spacer()
                     Button("Done") { model.closeRunner() }
-                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(PrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
                 .padding(12)
             }
@@ -278,28 +279,28 @@ struct RunnerView: View {
                 .controlSize(.small)
         } else if let result = row.result {
             if result.skipped {
-                Image(systemName: "forward.end.circle").foregroundStyle(.secondary)
+                Image(systemName: "forward.end.circle").foregroundStyle(Theme.textSecondary)
             } else if result.passed {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success)
             } else {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.danger)
             }
         } else {
-            Image(systemName: "circle").foregroundStyle(.tertiary)
+            Image(systemName: "circle").foregroundStyle(Theme.textTertiary)
         }
     }
 
     private func failures(_ result: RequestRunResult) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             if let error = result.error {
-                Text(error).foregroundStyle(.red)
+                Text(error).foregroundStyle(Theme.danger)
             }
             if let error = result.scriptError {
-                Text("Script error: \(error)").foregroundStyle(.red)
+                Text("Script error: \(error)").foregroundStyle(Theme.danger)
             }
             ForEach(Array(result.failedTests.enumerated()), id: \.offset) { _, test in
                 Text("✗ \(test.name)\(test.message.map { " — \($0)" } ?? "")")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.danger)
             }
         }
         .font(.callout)
