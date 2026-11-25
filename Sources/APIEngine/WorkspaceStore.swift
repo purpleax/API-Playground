@@ -45,6 +45,7 @@ public struct WorkspaceStore: Sendable {
         var testScript: String?
         var postmanID: String?
         var order: [String]?
+        var sequences: [DemoSequence]?
     }
 
     private struct FolderFile: Codable {
@@ -127,7 +128,7 @@ public struct WorkspaceStore: Sendable {
             let file = dir.appendingPathComponent("collection.json")
             guard fm.fileExists(atPath: file.path) else { continue }
             let meta = try decode(CollectionFile.self, from: file)
-            result.append(APICollection(
+            var collection = APICollection(
                 id: meta.id,
                 name: meta.name,
                 description: meta.description ?? "",
@@ -137,7 +138,9 @@ public struct WorkspaceStore: Sendable {
                 testScript: meta.testScript ?? "",
                 postmanID: meta.postmanID,
                 items: try loadItems(in: dir, order: meta.order ?? [])
-            ))
+            )
+            collection.sequences = meta.sequences ?? []
+            result.append(collection)
         }
         return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -160,7 +163,8 @@ public struct WorkspaceStore: Sendable {
                 preRequestScript: collection.preRequestScript,
                 testScript: collection.testScript,
                 postmanID: collection.postmanID,
-                order: order
+                order: order,
+                sequences: collection.sequences.isEmpty ? nil : collection.sequences
             ), to: temp.appendingPathComponent("collection.json"))
 
             if let existing = try collectionDirectory(id: collection.id) {

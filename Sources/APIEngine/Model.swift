@@ -157,12 +157,75 @@ public struct SavedResponse: Codable, Hashable, Sendable {
     public var status: Int
     public var headers: [KeyValue]
     public var body: String
+    public var statusText: String?
 
-    public init(name: String, status: Int, headers: [KeyValue] = [], body: String = "") {
+    public init(name: String, status: Int, headers: [KeyValue] = [], body: String = "", statusText: String? = nil) {
         self.name = name
         self.status = status
         self.headers = headers
         self.body = body
+        self.statusText = statusText
+    }
+
+    /// Pins a live response, so it can be shown again later or served by a mock.
+    public init(name: String, pinning response: HTTPResponse) {
+        self.init(
+            name: name,
+            status: response.status,
+            headers: response.headers.map { KeyValue(key: $0.name, value: $0.value) },
+            body: response.text ?? "",
+            statusText: response.statusText
+        )
+    }
+
+    /// The pinned response in the shape the response viewer shows. It has no timings or wire log.
+    public var asResponse: HTTPResponse {
+        HTTPResponse(
+            status: status,
+            statusText: statusText ?? "",
+            httpVersion: "Pinned",
+            headers: headers.filter(\.enabled).map { HTTPHeader(name: $0.key, value: $0.value) },
+            body: Data(body.utf8),
+            timings: HTTPTimings(),
+            remoteAddress: nil,
+            wireLog: []
+        )
+    }
+}
+
+/// One step of a demo: a request to send and what to say about it.
+public struct DemoStep: Codable, Hashable, Identifiable, Sendable {
+    public var id = UUID()
+    public var requestID: UUID
+    public var note: String
+
+    enum CodingKeys: String, CodingKey { case requestID, note }
+
+    public init(requestID: UUID, note: String = "") {
+        self.requestID = requestID
+        self.note = note
+    }
+
+    public static func == (a: DemoStep, b: DemoStep) -> Bool {
+        a.requestID == b.requestID && a.note == b.note
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(requestID)
+        hasher.combine(note)
+    }
+}
+
+/// An ordered list of requests to step through in front of an audience.
+public struct DemoSequence: Codable, Hashable, Identifiable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var steps: [DemoStep]
+
+    public init(id: UUID = UUID(), name: String = "New Demo", steps: [DemoStep] = []) {
+        self.id = id
+        self.name = name
+        self.steps = steps
     }
 }
 
@@ -300,6 +363,7 @@ public struct APICollection: Hashable, Identifiable, Sendable {
     /// The Postman collection this was imported from, so a later import updates it in place.
     public var postmanID: String?
     public var items: [Node]
+    public var sequences: [DemoSequence] = []
 
     public init(
         id: UUID = UUID(),
@@ -500,6 +564,14 @@ extension APICollection {
         var copy = self
         copy.id = old.id
         copy.items = adopt(items, path: "")
+        // Demo sequences are made in this app, so an import has none of its own. Keep the
+        // old ones, minus any step whose request is no longer there.
+        let ids = Set(APICollection(items: copy.items).allRequests.map(\.id))
+        copy.sequences = old.sequences.map { sequence in
+            var kept = sequence
+            kept.steps.removeAll { !ids.contains($0.requestID) }
+            return kept
+        }
         return copy
     }
 
