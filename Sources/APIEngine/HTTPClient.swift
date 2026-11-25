@@ -2,9 +2,19 @@ import CCurlShim
 import Foundation
 
 public struct HTTPOptions: Sendable {
+    public enum Version: Sendable {
+        /// Whatever the server and libcurl agree on.
+        case automatic
+        /// HTTP/2, negotiated over TLS, or by upgrade without it.
+        case http2
+        /// HTTP/2 from the first byte with no negotiation, as gRPC servers without TLS expect.
+        case http2PriorKnowledge
+    }
+
     public var followRedirects = true
     public var timeout: TimeInterval = 30
     public var verifyTLS = true
+    public var version = Version.automatic
 
     public init(followRedirects: Bool = true, timeout: TimeInterval = 30, verifyTLS: Bool = true) {
         self.followRedirects = followRedirects
@@ -223,6 +233,12 @@ public struct HTTPClient: Sendable {
             return 0
         }
         _ = apc_setopt_long(handle, CURLOPT_NOSIGNAL, 1)
+        switch options.version {
+        case .automatic: break
+        // CURL_HTTP_VERSION_2_0 and CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE.
+        case .http2: _ = apc_setopt_long(handle, CURLOPT_HTTP_VERSION, 3)
+        case .http2PriorKnowledge: _ = apc_setopt_long(handle, CURLOPT_HTTP_VERSION, 5)
+        }
         if !options.verifyTLS {
             _ = apc_setopt_long(handle, CURLOPT_SSL_VERIFYPEER, 0)
             _ = apc_setopt_long(handle, CURLOPT_SSL_VERIFYHOST, 0)
