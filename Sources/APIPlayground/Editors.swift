@@ -10,6 +10,8 @@ enum CodeSyntax {
     case script
     /// The wire log: sent lines, received lines and notes.
     case log
+    /// YAML, for API specs and lint rulesets.
+    case yaml
     case plain
 }
 
@@ -30,6 +32,12 @@ enum Highlighter {
     private static let keyword = regex(#"\b(?:const|let|var|function|return|if|else|for|while|new|typeof|throw|try|catch|of|in)\b"#)
     private static let comment = regex(#"//[^\n]*"#)
     private static let logLine = regex(#"^([><*]) .*$"#, [.anchorsMatchLines])
+    private static let yamlKey = regex(#"^[ \t]*(?:- +)*((?:"[^"\n]*"|'[^'\n]*'|[^\s#:"'\-\[{][^:#\n]*?))(?=:(?:\s|$))"#, [.anchorsMatchLines])
+    private static let yamlComment = regex(#"(?:^|(?<=\s))#[^\n]*"#, [.anchorsMatchLines])
+    private static let yamlDash = regex(#"^[ \t]*((?:- +)+|-$)"#, [.anchorsMatchLines])
+    private static let yamlPunctuation = regex(#"[{}\[\]]|(?<=: )[|>][+-]?$"#, [.anchorsMatchLines])
+    private static let yamlNumber = regex(#"(?<=[:\-,\[] )-?\d+(?:\.\d+)?(?=\s*(?:$|[,\]}#]))"#, [.anchorsMatchLines])
+    private static let yamlLiteral = regex(#"(?<=[:\-,\[] )(?:true|false|null|~)(?=\s*(?:$|[,\]}#]))"#, [.anchorsMatchLines])
 
     /// Above this size the text is left one colour, so huge responses stay fast.
     private static let limit = 400_000
@@ -62,6 +70,20 @@ enum Highlighter {
                 }
                 storage.addAttribute(.foregroundColor, value: color, range: match.range)
             }
+        case .yaml:
+            paint(yamlPunctuation, Theme.Syntax.punctuation)
+            paint(yamlNumber, Theme.Syntax.number)
+            paint(yamlLiteral, Theme.Syntax.keyword)
+            paint(doubleQuoted, Theme.Syntax.string)
+            paint(singleQuoted, Theme.Syntax.string)
+            yamlDash.enumerateMatches(in: storage.string, range: whole) { match, _, _ in
+                if let range = match?.range(at: 1) { storage.addAttribute(.foregroundColor, value: Theme.Syntax.punctuation, range: range) }
+            }
+            yamlKey.enumerateMatches(in: storage.string, range: whole) { match, _, _ in
+                if let range = match?.range(at: 1) { storage.addAttribute(.foregroundColor, value: Theme.Syntax.key, range: range) }
+            }
+            paint(variable, Theme.Syntax.variable)
+            paint(yamlComment, Theme.Syntax.comment)
         case .json, .script:
             paint(punctuation, Theme.Syntax.punctuation)
             paint(number, Theme.Syntax.number)
@@ -92,6 +114,15 @@ struct CodeTextView: NSViewRepresentable {
     var isEditable = true
     var fontSize: CGFloat = 12
     var syntax: CodeSyntax = .json
+    /// A line to select and scroll to. Give a new request each time, even for the same line.
+    var reveal: RevealRequest?
+
+    /// A request to show one line of the text.
+    struct RevealRequest: Equatable {
+        /// 1-based.
+        var line: Int
+        var token = UUID()
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -139,6 +170,23 @@ struct CodeTextView: NSViewRepresentable {
         } else if fontChanged {
             restyle(textView)
         }
+        if let reveal, reveal.token != context.coordinator.lastReveal {
+            context.coordinator.lastReveal = reveal.token
+            let string = textView.string as NSString
+            var location = 0
+            var line = 1
+            while line < reveal.line, location < string.length {
+                location = NSMaxRange(string.lineRange(for: NSRange(location: location, length: 0)))
+                line += 1
+            }
+            guard line == reveal.line, location <= string.length else { return }
+            var range = string.lineRange(for: NSRange(location: min(location, string.length), length: 0))
+            // Leave the line break out of the selection.
+            while range.length > 0, [0x0A, 0x0D].contains(string.character(at: NSMaxRange(range) - 1)) { range.length -= 1 }
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+            textView.showFindIndicator(for: range)
+        }
     }
 
     fileprivate func restyle(_ textView: NSTextView) {
@@ -151,6 +199,7 @@ struct CodeTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CodeTextView
+        var lastReveal: UUID?
 
         init(_ parent: CodeTextView) {
             self.parent = parent

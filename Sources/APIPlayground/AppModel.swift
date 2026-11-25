@@ -115,7 +115,7 @@ final class AppModel {
 
     private(set) var store: WorkspaceStore
     private let history: HistoryStore
-    private let executor = RequestExecutor(tokens: OAuth2TokenStore(secrets: AppModel.secrets))
+    let executor = RequestExecutor(tokens: OAuth2TokenStore(secrets: AppModel.secrets))
 
     /// Responses that are still arriving, by request.
     var live: [UUID: LiveStream] = [:]
@@ -140,7 +140,18 @@ final class AppModel {
     var globals: [Variable] = []
 
     /// The selected request.
-    var selection: UUID?
+    var selection: UUID? {
+        didSet { if selection != nil { selectedSpec = nil } }
+    }
+    /// The API specs in the workspace, and the file name of the one being edited.
+    var specs: [SpecFile] = []
+    var selectedSpec: String?
+    /// The workspace's lint ruleset, as text.
+    var ruleset = ""
+    var showingRuleset = false
+    /// Routes sent straight from a spec, by spec file and operation.
+    var specRuns: [String: SpecRun] = [:]
+    @ObservationIgnored var specSaveTasks: [String: Task<Void, Never>] = [:]
     var activeEnvironmentID: UUID? {
         didSet { UserDefaults.standard.set(activeEnvironmentID?.uuidString, forKey: "activeEnvironment") }
     }
@@ -241,6 +252,8 @@ final class AppModel {
         UserDefaults.standard.set(url?.path, forKey: "vaultPath")
         store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
         selection = nil
+        selectedSpec = nil
+        specRuns = [:]
         responses = [:]
         git = nil
         mergeSession = nil
@@ -253,6 +266,9 @@ final class AppModel {
             collections = try store.loadCollections()
             environments = try store.loadEnvironments()
             globals = try store.loadGlobals()
+            specs = try store.loadSpecs()
+            ruleset = store.loadRuleset()
+            if let selectedSpec, spec(selectedSpec) == nil { self.selectedSpec = nil }
             expanded.formUnion(collections.map(\.id))
             let saved = UserDefaults.standard.string(forKey: "activeEnvironment").flatMap(UUID.init(uuidString:))
             activeEnvironmentID = environments.contains { $0.id == saved } ? saved : nil
@@ -265,7 +281,7 @@ final class AppModel {
         }
     }
 
-    fileprivate func show(_ title: String, _ error: Error) {
+    func show(_ title: String, _ error: Error) {
         notice = Notice(title: title, message: error.localizedDescription)
     }
 
@@ -360,7 +376,7 @@ final class AppModel {
         save(collections[index])
     }
 
-    private func uniqueName(_ base: String, among names: [String]) -> String {
+    func uniqueName(_ base: String, among names: [String]) -> String {
         guard names.contains(base) else { return base }
         var counter = 2
         while names.contains("\(base) \(counter)") { counter += 1 }
@@ -369,7 +385,7 @@ final class AppModel {
 
     // MARK: Saving
 
-    private func save(_ collection: APICollection) {
+    func save(_ collection: APICollection) {
         saveTasks[collection.id]?.cancel()
         saveTasks[collection.id] = nil
         if mock?.collectionID == collection.id { refreshMock() }
@@ -379,6 +395,7 @@ final class AppModel {
 
     /// Writes any edits still waiting to be saved, so the files on disk are current.
     func flushPendingSaves() {
+        flushSpecSaves()
         for id in Array(saveTasks.keys) {
             if let collection = collections.first(where: { $0.id == id }) { save(collection) }
         }
@@ -399,6 +416,7 @@ final class AppModel {
     func flushSaves() {
         // Remove the temporary mock environment rather than leaving it behind in the workspace.
         stopMock()
+        flushSpecSaves()
         for id in Array(saveTasks.keys) {
             if let collection = collections.first(where: { $0.id == id }) { save(collection) }
         }

@@ -38,6 +38,10 @@ struct APIPlaygroundApp: App {
                 Button("Import cURL from Clipboard") { model.importCurlFromClipboard() }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
                 Divider()
+                Button("New API Spec") { model.newSpec() }
+                Button("Import OpenAPI Spec…") { model.chooseSpecsToImport() }
+                Button("Lint Rules…") { model.showingRuleset = true }
+                Divider()
                 Button("Open Local Vault…") { chooseVault() }
                 Button("Use Scratch Pad") { model.openVault(nil) }
                     .disabled(model.vaultURL == nil)
@@ -180,7 +184,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let id = model.selection, model.request(id) != nil {
+        if let file = model.selectedSpec, model.spec(file) != nil {
+            SpecView(file: file)
+                .id(file)
+        } else if let id = model.selection, model.request(id) != nil {
             HSplitView {
                 RequestEditorView(requestID: id)
                     .card()
@@ -256,6 +263,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $model.showingGit) {
             GitView()
+                .environment(model)
+                .themedSheet()
+        }
+        .sheet(isPresented: $model.showingRuleset) {
+            RulesetView()
                 .environment(model)
                 .themedSheet()
         }

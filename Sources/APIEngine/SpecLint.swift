@@ -555,8 +555,8 @@ struct CustomRule {
             return node == nil ? nil : "\(label) must not be defined."
         case "pattern":
             guard let text = node?.string else { return nil }
-            if let match = options?["match"]?.string, !matches(text, match) { return "\(label) must match the pattern \(match)." }
-            if let notMatch = options?["notMatch"]?.string, matches(text, notMatch) { return "\(label) must not match the pattern \(notMatch)." }
+            if let match = options?["match"]?.string, matches(text, match) == false { return "\(label) must match the pattern \(match)." }
+            if let notMatch = options?["notMatch"]?.string, matches(text, notMatch) == true { return "\(label) must not match the pattern \(notMatch)." }
             return nil
         case "casing":
             guard let text = node?.string, !text.isEmpty, let type = options?["type"]?.string else { return nil }
@@ -567,7 +567,7 @@ struct CustomRule {
                 "flat": "^[a-z][a-z0-9]*$",
             ]
             guard let pattern = patterns[type] else { return nil }
-            return matches(text, pattern) ? nil : "\(label) must be \(type) case."
+            return matches(text, pattern) == false ? "\(label) must be \(type) case." : nil
         case "length":
             guard let node else { return nil }
             let size: Double
@@ -603,7 +603,8 @@ struct CustomRule {
     }
 
     /// Tests a value against a pattern written either plainly or as `/pattern/flags`.
-    static func matches(_ text: String, _ pattern: String) -> Bool {
+    /// - Returns: nil when the pattern itself is not valid, so a broken rule reports nothing.
+    static func matches(_ text: String, _ pattern: String) -> Bool? {
         var source = pattern
         var options: NSRegularExpression.Options = []
         if pattern.hasPrefix("/"), let end = pattern.lastIndex(of: "/"), end != pattern.startIndex {
@@ -613,7 +614,7 @@ struct CustomRule {
             if flags.contains("m") { options.insert(.anchorsMatchLines) }
             if flags.contains("s") { options.insert(.dotMatchesLineSeparators) }
         }
-        guard let regex = try? NSRegularExpression(pattern: source, options: options) else { return false }
+        guard let regex = try? NSRegularExpression(pattern: source, options: options) else { return nil }
         return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 }

@@ -41,6 +41,7 @@ struct SidebarView: View {
                         ForEach(model.collections) { collection in
                             collectionSection(collection)
                         }
+                        specsSection
                     } else {
                         filteredResults
                     }
@@ -49,7 +50,7 @@ struct SidebarView: View {
                 .padding(.bottom, 8)
             }
             .overlay {
-                if model.collections.isEmpty {
+                if model.collections.isEmpty, model.specs.isEmpty {
                     Text("No collections yet")
                         .font(.system(size: 12.5))
                         .foregroundStyle(Theme.textTertiary)
@@ -65,6 +66,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 Spacer()
+                IconButton(systemImage: "doc.badge.plus", help: "New API spec") { model.newSpec() }
                 IconButton(systemImage: "shippingbox", help: "New collection") { model.newCollection() }
             }
             .padding(10)
@@ -155,6 +157,47 @@ struct SidebarView: View {
                     Button("Edit") { model.editingSequence = reference }
                     Divider()
                     Button("Delete Demo", role: .destructive) { model.deleteSequence(reference) }
+                }
+            }
+        }
+    }
+
+    /// The workspace's API specs, under the collections.
+    @ViewBuilder
+    private var specsSection: some View {
+        if !model.specs.isEmpty {
+            Text("Specs").sectionTitle()
+                .padding(.leading, 8)
+                .padding(.top, 14)
+                .padding(.bottom, 3)
+            ForEach(model.specs) { spec in
+                SidebarRow(depth: 0, isSelected: model.selectedSpec == spec.file) {
+                    model.selection = nil
+                    model.selectedSpec = spec.file
+                } content: {
+                    Image(systemName: "doc.text.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 14)
+                    Text(spec.name)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text((spec.file as NSString).pathExtension.uppercased())
+                        .font(.system(size: 8.5, weight: .heavy))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .contextMenu {
+                    Button(model.collection(forSpec: spec.file) == nil ? "Make Collection" : "Update Collection") {
+                        if let made = model.generateCollection(fromSpec: spec.file) {
+                            model.notice = Notice(title: "Collection ready", message: made.message)
+                        }
+                    }
+                    Button("Mock Server…") { model.mockSpec(spec.file) }
+                    Divider()
+                    Button("Delete Spec", role: .destructive) { model.deleteSpec(spec.file) }
                 }
             }
         }
