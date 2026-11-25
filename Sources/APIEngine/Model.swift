@@ -85,14 +85,24 @@ public struct Variable: Codable, Hashable, Identifiable, Sendable {
     public var value: String
     public var enabled: Bool
     public var secret: Bool
+    /// A value used on this Mac only, in place of `value`. It is never written to the
+    /// workspace, so it stays out of Git. Not used for secrets, whose value is already local.
+    public var currentValue: String?
 
     enum CodingKeys: String, CodingKey { case key, value, enabled, secret }
 
-    public init(key: String = "", value: String = "", enabled: Bool = true, secret: Bool = false) {
+    public init(key: String = "", value: String = "", enabled: Bool = true, secret: Bool = false, currentValue: String? = nil) {
         self.key = key
         self.value = value
         self.enabled = enabled
         self.secret = secret
+        self.currentValue = currentValue
+    }
+
+    /// The value requests actually use.
+    public var effectiveValue: String {
+        if !secret, let currentValue, !currentValue.isEmpty { return currentValue }
+        return value
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,6 +115,7 @@ public struct Variable: Codable, Hashable, Identifiable, Sendable {
 
     public static func == (a: Variable, b: Variable) -> Bool {
         a.key == b.key && a.value == b.value && a.enabled == b.enabled && a.secret == b.secret
+            && a.currentValue == b.currentValue
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -405,6 +416,49 @@ extension APICollection {
             return false
         }
         return remove(&items)
+    }
+
+    /// Carries ids over from an earlier version of this collection, matching folders and
+    /// requests by their position in the tree and their name. Used when a Postman collection
+    /// is imported again, so each request keeps its history.
+    public func adoptingIdentities(from old: APICollection) -> APICollection {
+        var known: [String: UUID] = [:]
+        func collect(_ nodes: [Node], path: String) {
+            var seen: [String: Int] = [:]
+            for node in nodes {
+                let kind = { if case .folder = node { return "F" } else { return "R" } }()
+                let base = "\(path)/\(kind):\(node.name)"
+                seen[base, default: 0] += 1
+                let key = "\(base)#\(seen[base]!)"
+                known[key] = node.id
+                if case .folder(let folder) = node { collect(folder.items, path: key) }
+            }
+        }
+        collect(old.items, path: "")
+
+        func adopt(_ nodes: [Node], path: String) -> [Node] {
+            var seen: [String: Int] = [:]
+            return nodes.map { node in
+                let kind = { if case .folder = node { return "F" } else { return "R" } }()
+                let base = "\(path)/\(kind):\(node.name)"
+                seen[base, default: 0] += 1
+                let key = "\(base)#\(seen[base]!)"
+                switch node {
+                case .request(var request):
+                    if let id = known[key] { request.id = id }
+                    return .request(request)
+                case .folder(var folder):
+                    if let id = known[key] { folder.id = id }
+                    folder.items = adopt(folder.items, path: key)
+                    return .folder(folder)
+                }
+            }
+        }
+
+        var copy = self
+        copy.id = old.id
+        copy.items = adopt(items, path: "")
+        return copy
     }
 
     /// The auth a request actually uses: its own, or the nearest parent's that is not "inherit".

@@ -16,11 +16,13 @@ public struct ImportReport: Equatable, Sendable {
 public enum PostmanImportError: Error, LocalizedError, Equatable {
     case notJSON
     case notPostman
+    case unreadableArchive
 
     public var errorDescription: String? {
         switch self {
         case .notJSON: return "The file is not valid JSON."
         case .notPostman: return "The file is not a Postman collection or environment export."
+        case .unreadableArchive: return "The zip file could not be opened."
         }
     }
 }
@@ -54,6 +56,73 @@ public enum PostmanImporter {
             return .environment(environment, isGlobals: isGlobals, report)
         }
         throw PostmanImportError.notPostman
+    }
+
+    /// The documents found in one imported file, and the entries that were not Postman exports.
+    public struct Batch: Sendable {
+        public var documents: [PostmanDocument] = []
+        public var skipped: [String] = []
+    }
+
+    /// Reads a Postman export from disk: a single JSON file, a backup file holding several
+    /// collections and environments, or the zip that Postman's "Export Data" produces.
+    public static func importFile(at url: URL) throws -> Batch {
+        var batch = Batch()
+        if url.pathExtension.lowercased() == "zip" {
+            let fm = FileManager.default
+            let temp = fm.temporaryDirectory.appendingPathComponent("postman-import-\(UUID().uuidString)", isDirectory: true)
+            try fm.createDirectory(at: temp, withIntermediateDirectories: true)
+            defer { try? fm.removeItem(at: temp) }
+
+            let unzip = Process()
+            unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            unzip.arguments = ["-qq", "-o", url.path, "-d", temp.path]
+            unzip.standardOutput = FileHandle.nullDevice
+            unzip.standardError = FileHandle.nullDevice
+            try unzip.run()
+            unzip.waitUntilExit()
+            guard unzip.terminationStatus == 0 else { throw PostmanImportError.unreadableArchive }
+
+            let files = (fm.enumerator(at: temp, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
+                .filter { $0.pathExtension.lowercased() == "json" }
+                .sorted { $0.path < $1.path }
+            for file in files {
+                // Resolve both paths first: the temp folder is reached through a symlink (/var -> /private/var).
+                let rootPath = temp.resolvingSymlinksInPath().path
+                let name = String(file.resolvingSymlinksInPath().path.dropFirst(rootPath.count + 1))
+                guard let data = try? Data(contentsOf: file) else { continue }
+                add(data, name: name, to: &batch)
+            }
+        } else {
+            add(try Data(contentsOf: url), name: url.lastPathComponent, to: &batch)
+            // A lone file that is not a Postman export is an error, not something to skip quietly.
+            if batch.documents.isEmpty {
+                _ = try importDocument(data: Data(contentsOf: url))
+            }
+        }
+        return batch
+    }
+
+    private static func add(_ data: Data, name: String, to batch: inout Batch) {
+        if let document = try? importDocument(data: data) {
+            batch.documents.append(document)
+            return
+        }
+        // A backup file lists collections and environments in arrays.
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              root["collections"] is [Any] || root["environments"] is [Any] else {
+            batch.skipped.append("\(name): not a Postman collection or environment.")
+            return
+        }
+        for (index, entry) in ((root["collections"] as? [Any] ?? []) + (root["environments"] as? [Any] ?? [])).enumerated() {
+            if let entryData = try? JSONSerialization.data(withJSONObject: entry),
+               let document = try? importDocument(data: entryData) {
+                batch.documents.append(document)
+            } else {
+                let label = (entry as? [String: Any])?["name"] as? String ?? "entry \(index + 1)"
+                batch.skipped.append("\(name): \"\(label)\" is in a format that is not supported (Collection v2.0 or v2.1 is needed).")
+            }
+        }
     }
 
     // MARK: Collection

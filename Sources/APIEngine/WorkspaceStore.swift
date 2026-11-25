@@ -15,10 +15,13 @@ import Foundation
 public struct WorkspaceStore: Sendable {
     public let root: URL
     public let secrets: any SecretStore
+    /// Where this-Mac-only "current values" are kept. Nil means they are not kept at all.
+    public let localValues: LocalValueStore?
 
-    public init(root: URL, secrets: any SecretStore) {
+    public init(root: URL, secrets: any SecretStore, localValues: LocalValueStore? = nil) {
         self.root = root
         self.secrets = secrets
+        self.localValues = localValues
     }
 
     private var collectionsDir: URL { root.appendingPathComponent("collections", isDirectory: true) }
@@ -87,7 +90,13 @@ public struct WorkspaceStore: Sendable {
 
     /// Moves secret values into the secret store and blanks them, ready to write to a file.
     private func stripSecrets(_ variables: [Variable], owner: String) -> [Variable] {
-        variables.map { variable in
+        var current: [String: String] = [:]
+        for variable in variables where !variable.secret {
+            if let value = variable.currentValue, !value.isEmpty { current[variable.key] = value }
+        }
+        localValues?.set(current, owner: owner)
+
+        return variables.map { variable in
             guard variable.secret else { return variable }
             secrets.set(variable.value, for: "\(owner)/\(variable.key)")
             var copy = variable
@@ -97,8 +106,13 @@ public struct WorkspaceStore: Sendable {
     }
 
     private func fillSecrets(_ variables: [Variable], owner: String) -> [Variable] {
-        variables.map { variable in
-            guard variable.secret else { return variable }
+        let current = localValues?.values(owner: owner) ?? [:]
+        return variables.map { variable in
+            guard variable.secret else {
+                var copy = variable
+                copy.currentValue = current[variable.key]
+                return copy
+            }
             var copy = variable
             copy.value = secrets.get("\(owner)/\(variable.key)") ?? ""
             return copy
@@ -283,6 +297,7 @@ public struct WorkspaceStore: Sendable {
         if let file = try environmentFile(id: id) {
             try fm.removeItem(at: file)
         }
+        localValues?.set([:], owner: id.uuidString)
     }
 
     private func environmentFile(id: UUID) throws -> URL? {

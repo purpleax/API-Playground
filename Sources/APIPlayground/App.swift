@@ -10,7 +10,9 @@ struct APIPlaygroundApp: App {
     @State private var importingPostman = false
 
     var body: some Scene {
-        WindowGroup("API Playground") {
+        // One window: the app has a single workspace open at a time. A WindowGroup would
+        // open an extra window each time a file is opened with the app.
+        Window("API Playground", id: "main") {
             ContentView(importingPostman: $importingPostman)
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 520)
@@ -135,8 +137,17 @@ struct ContentView: View {
                 .help("Import Postman collections and environments")
             }
         }
-        .fileImporter(isPresented: $importingPostman, allowedContentTypes: [.json], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $importingPostman, allowedContentTypes: [.json, .zip], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { model.importPostmanFiles(urls) }
+        }
+        .task {
+            // A report made before the window existed (files opened at launch) is not
+            // presented by SwiftUI, so set it again once the window is up.
+            if let pending = model.notice {
+                model.notice = nil
+                try? await Task.sleep(for: .milliseconds(500))
+                model.notice = pending
+            }
         }
         .sheet(isPresented: $model.showingEnvironments) {
             EnvironmentsView()

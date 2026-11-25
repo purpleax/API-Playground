@@ -120,11 +120,16 @@ struct VariableEditor: View {
                         .labelsHidden()
                         .toggleStyle(.checkbox)
                     TextField("Name", text: $variable.key)
-                        .frame(minWidth: 90, idealWidth: 160)
+                        .frame(width: 150)
                     if variable.secret {
                         SecureField("Value", text: $variable.value)
                     } else {
-                        TextField("Value", text: $variable.value)
+                        TextField("Shared value", text: $variable.value)
+                        TextField("This Mac only", text: Binding(
+                            get: { variable.currentValue ?? "" },
+                            set: { variable.currentValue = $0.isEmpty ? nil : $0 }
+                        ))
+                        .help("Used in place of the shared value on this Mac. Never saved to the workspace.")
                     }
                     Toggle(isOn: $variable.secret) {
                         Image(systemName: variable.secret ? "lock.fill" : "lock.open")
@@ -179,6 +184,9 @@ struct EnvironmentsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        Text("A \"This Mac only\" value replaces the shared value here and is never saved to the workspace.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                         if selected == nil {
                             Text("Globals").font(.headline)
                             Text("Available to every request. A collection or environment variable with the same name wins.")
@@ -222,7 +230,7 @@ struct EnvironmentsView: View {
             }
             .padding(12)
         }
-        .frame(width: 760, height: 480)
+        .frame(width: 940, height: 520)
         .onAppear {
             globalsDraft = model.globals
             selected = model.activeEnvironmentID

@@ -273,3 +273,136 @@ func importSampleEnvironment() throws -> APIEnvironment {
         #expect(preparedKey.url == "https://api.example.com/status?api_key=s3cret")
     }
 }
+
+@Suite struct ReimportAndArchives {
+    @Test func reimportKeepsIdentities() throws {
+        let (first, _) = try importSampleCollection()
+        var (second, _) = try importSampleCollection()
+        // The newer export renames nothing, drops one request and adds another.
+        second.removeNode(id: try #require(second.allRequests.first { $0.name == "Login" }).id)
+        second.append(.request(RequestItem(name: "Brand new")))
+
+        let merged = second.adoptingIdentities(from: first)
+        #expect(merged.id == first.id)
+        for name in ["List pets", "Create pet", "Key in query"] {
+            let old = try #require(first.allRequests.first { $0.name == name })
+            let new = try #require(merged.allRequests.first { $0.name == name })
+            #expect(old.id == new.id, "\(name) should keep its id")
+        }
+        #expect(merged.items.first?.id == first.items.first?.id)
+        let added = try #require(merged.allRequests.first { $0.name == "Brand new" })
+        #expect(!first.allRequests.contains { $0.id == added.id })
+    }
+
+    @Test func duplicateNamesKeepTheirOrder() {
+        let old = APICollection(name: "C", items: [.request(RequestItem(name: "Same")), .request(RequestItem(name: "Same"))])
+        let new = APICollection(name: "C", items: [.request(RequestItem(name: "Same")), .request(RequestItem(name: "Same"))])
+        #expect(new.adoptingIdentities(from: old).items.map(\.id) == old.items.map(\.id))
+    }
+
+    func makeTempDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("apiplayground-archive-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func importsEveryPostmanFileInAZip() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let content = dir.appendingPathComponent("export")
+        try FileManager.default.createDirectory(at: content.appendingPathComponent("collection"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: content.appendingPathComponent("environment"), withIntermediateDirectories: true)
+        try Data(sampleCollectionV21.utf8).write(to: content.appendingPathComponent("collection/pets.json"))
+        try Data(sampleEnvironment.utf8).write(to: content.appendingPathComponent("environment/staging.json"))
+        try Data("{\"version\": 1}".utf8).write(to: content.appendingPathComponent("archive.json"))
+
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = content
+        zip.arguments = ["-qr", dir.appendingPathComponent("export.zip").path, "."]
+        try zip.run()
+        zip.waitUntilExit()
+        #expect(zip.terminationStatus == 0)
+
+        let batch = try PostmanImporter.importFile(at: dir.appendingPathComponent("export.zip"))
+        var collections = 0
+        var environments = 0
+        for document in batch.documents {
+            switch document {
+            case .collection: collections += 1
+            case .environment: environments += 1
+            }
+        }
+        #expect(collections == 1)
+        #expect(environments == 1)
+        #expect(batch.skipped.count == 1)
+        #expect(batch.skipped.first?.hasPrefix("archive.json") == true)
+    }
+
+    @Test func importsABackupFileAndReportsOldFormats() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let backup = """
+        { "version": 1,
+          "collections": [ \(sampleCollectionV21), { "name": "Legacy", "requests": [] } ],
+          "environments": [ \(sampleEnvironment) ] }
+        """
+        let file = dir.appendingPathComponent("Backup.postman_dump.json")
+        try Data(backup.utf8).write(to: file)
+
+        let batch = try PostmanImporter.importFile(at: file)
+        #expect(batch.documents.count == 2)
+        #expect(batch.skipped.count == 1)
+        #expect(batch.skipped.first?.contains("Legacy") == true)
+    }
+
+    @Test func aLoneNonPostmanFileIsAnError() throws {
+        let dir = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("other.json")
+        try Data("{\"hello\": 1}".utf8).write(to: file)
+        #expect(throws: PostmanImportError.notPostman) { try PostmanImporter.importFile(at: file) }
+        #expect(throws: PostmanImportError.unreadableArchive) {
+            try PostmanImporter.importFile(at: dir.appendingPathComponent("missing.zip"))
+        }
+    }
+}
+
+@Suite struct CurrentValues {
+    @Test func currentValueOverridesButSecretsIgnoreIt() {
+        #expect(Variable(key: "a", value: "shared", currentValue: "mine").effectiveValue == "mine")
+        #expect(Variable(key: "a", value: "shared", currentValue: "").effectiveValue == "shared")
+        #expect(Variable(key: "a", value: "s", secret: true, currentValue: "mine").effectiveValue == "s")
+        let resolver = VariableResolver(environment: [Variable(key: "host", value: "shared", currentValue: "mine")])
+        #expect(resolver.resolve("{{host}}").string == "mine")
+    }
+
+    @Test func currentValuesStayOutOfTheWorkspace() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("apiplayground-local-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let local = LocalValueStore(file: base.appendingPathComponent("local/values.json"))
+        let store = WorkspaceStore(root: base.appendingPathComponent("workspace"), secrets: InMemorySecretStore(), localValues: local)
+
+        let environment = APIEnvironment(name: "Dev", variables: [
+            Variable(key: "host", value: "shared.example.com", currentValue: "localhost:9999"),
+            Variable(key: "plain", value: "x"),
+        ])
+        try store.save(environment)
+
+        let file = base.appendingPathComponent("workspace/environments/dev.env.json")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(text.contains("shared.example.com"))
+        #expect(!text.contains("localhost:9999"))
+        #expect(!text.contains("currentValue"))
+
+        #expect(try store.loadEnvironments() == [environment])
+        #expect(local.values(owner: environment.id.uuidString) == ["host": "localhost:9999"])
+
+        // Clearing the current value removes it from the local file too.
+        var cleared = environment
+        cleared.variables[0].currentValue = nil
+        try store.save(cleared)
+        #expect(local.values(owner: environment.id.uuidString).isEmpty)
+        #expect(try store.loadEnvironments() == [cleared])
+    }
+}

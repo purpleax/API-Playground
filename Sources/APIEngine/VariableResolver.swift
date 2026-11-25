@@ -18,7 +18,7 @@ public struct VariableResolver: Sendable {
         func dictionary(_ variables: [Variable]) -> [String: String] {
             var out: [String: String] = [:]
             for variable in variables where variable.enabled && !variable.key.isEmpty {
-                out[variable.key] = variable.value
+                out[variable.key] = variable.effectiveValue
             }
             return out
         }

@@ -52,6 +52,11 @@ final class AppModel {
         return base.appendingPathComponent("API Playground", isDirectory: true)
     }
 
+    /// Current values are kept beside the app's other private data, never in a workspace.
+    static var localValues: LocalValueStore {
+        LocalValueStore(file: supportDirectory.appendingPathComponent("Local Values.json"))
+    }
+
     static var scratchPadURL: URL { supportDirectory.appendingPathComponent("Scratch Pad", isDirectory: true) }
 
     /// The Local Vault folder, or nil when the Scratch Pad is in use.
@@ -65,7 +70,7 @@ final class AppModel {
         let vault = UserDefaults.standard.string(forKey: "vaultPath").map { URL(fileURLWithPath: $0, isDirectory: true) }
         let usableVault = vault.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         vaultURL = usableVault
-        store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: KeychainSecretStore())
+        store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: KeychainSecretStore(), localValues: Self.localValues)
         history = HistoryStore(root: Self.supportDirectory.appendingPathComponent("History", isDirectory: true))
         reload()
     }
@@ -74,7 +79,7 @@ final class AppModel {
         flushSaves()
         vaultURL = url
         UserDefaults.standard.set(url?.path, forKey: "vaultPath")
-        store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: KeychainSecretStore())
+        store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: KeychainSecretStore(), localValues: Self.localValues)
         selection = nil
         responses = [:]
         reload()
@@ -282,8 +287,14 @@ final class AppModel {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let document = try PostmanImporter.importDocument(data: Data(contentsOf: url))
-                lines.append(contentsOf: add(document))
+                let batch = try PostmanImporter.importFile(at: url)
+                for document in batch.documents {
+                    lines.append(contentsOf: add(document))
+                }
+                lines.append(contentsOf: batch.skipped.map { "Skipped \($0)" })
+                if batch.documents.isEmpty && batch.skipped.isEmpty {
+                    lines.append("\(url.lastPathComponent): nothing to import.")
+                }
             } catch {
                 lines.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -299,7 +310,8 @@ final class AppModel {
             // Importing a newer export of the same Postman collection updates it in place.
             if let postmanID = collection.postmanID,
                let index = collections.firstIndex(where: { $0.postmanID == postmanID }) {
-                collection.id = collections[index].id
+                // Requests keep their ids, and so their history, when their name and place are unchanged.
+                collection = collection.adoptingIdentities(from: collections[index])
                 collections[index] = collection
                 verb = "Updated"
             } else {
@@ -309,9 +321,9 @@ final class AppModel {
             save(collection)
             if let selection, request(selection) == nil { self.selection = nil }
 
-            var lines = ["\(verb) collection \"\(collection.name)\": \(report.requests) requests, \(report.folders) folders, \(report.examples) examples, \(report.variables) variables."]
+            var lines = ["\(verb) collection \"\(collection.name)\": \(Self.count(report.requests, "request")), \(Self.count(report.folders, "folder")), \(Self.count(report.examples, "example")), \(Self.count(report.variables, "variable"))."]
             if report.scriptsPreserved > 0 {
-                lines.append("\(report.scriptsPreserved) scripts were kept but will not run yet.")
+                lines.append("\(Self.count(report.scriptsPreserved, "script")) kept, but scripts do not run yet.")
             }
             lines.append(contentsOf: report.warnings)
             return lines
@@ -324,7 +336,7 @@ final class AppModel {
                     merged.append(variable)
                 }
                 saveGlobals(merged)
-                return ["Imported \(report.variables) global variables."]
+                return ["Imported \(Self.count(report.variables, "global variable"))."]
             }
             var verb = "Imported"
             if let index = environments.firstIndex(where: {
@@ -335,8 +347,12 @@ final class AppModel {
             }
             saveEnvironment(environment)
             if activeEnvironmentID == nil { activeEnvironmentID = environment.id }
-            return ["\(verb) environment \"\(environment.name)\": \(report.variables) variables."]
+            return ["\(verb) environment \"\(environment.name)\": \(Self.count(report.variables, "variable"))."]
         }
+    }
+
+    private static func count(_ number: Int, _ noun: String) -> String {
+        "\(number) \(noun)\(number == 1 ? "" : "s")"
     }
 
     func importCurlFromClipboard() {
