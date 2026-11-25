@@ -102,7 +102,7 @@ struct ResponseView: View {
                 }
                 if !result.tests.isEmpty || result.scriptError != nil {
                     let failed = result.failedTests.count + (result.scriptError == nil ? 0 : 1)
-                    Label(failed == 0 ? "Tests passed" : "\(failed) failed", systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    Label(failed == 0 ? "Passed" : "\(failed) failed", systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(failed == 0 ? Color.green : Color.red)
                 }
                 Spacer()

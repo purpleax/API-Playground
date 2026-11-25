@@ -168,6 +168,7 @@ final class AppModel {
             expanded.formUnion(collections.map(\.id))
             let saved = UserDefaults.standard.string(forKey: "activeEnvironment").flatMap(UUID.init(uuidString:))
             activeEnvironmentID = environments.contains { $0.id == saved } ? saved : nil
+            removeLeftoverMockEnvironment()
         } catch {
             show("Could not open the workspace", error)
         }
@@ -429,10 +430,17 @@ final class AppModel {
     /// The redactor for a request's views, or nil when secrets are being shown.
     func redactor(for requestID: UUID) -> Redactor? {
         guard secretsHidden, let index = collectionIndex(containingRequest: requestID) else { return nil }
+        let resolver = resolver(forCollection: index)
+        // The request's own key-like headers and parameters, which a server may echo back.
+        let request = collections[index].request(id: requestID)
+        let own = ((request?.headers ?? []) + (request?.params ?? []))
+            .filter { Redactor.isSensitiveName($0.key) }
+            .map { resolver.resolve($0.value).string }
         return Redactor(
             variables: globals + collections[index].variables + (activeEnvironment?.variables ?? []),
             auths: [collections[index].effectiveAuth(forRequest: requestID)],
-            resolver: resolver(forCollection: index)
+            resolver: resolver,
+            extra: own
         )
     }
 
@@ -476,6 +484,22 @@ final class AppModel {
 
     // MARK: Mock server
 
+    /// Removes the temporary environment of a mock that was running when the app last quit
+    /// without stopping it, and goes back to the environment that was active before.
+    private func removeLeftoverMockEnvironment() {
+        let defaults = UserDefaults.standard
+        guard mock == nil, let leftover = defaults.string(forKey: "mockEnvironment").flatMap(UUID.init(uuidString:)) else { return }
+        let previous = defaults.string(forKey: "mockPreviousEnvironment").flatMap(UUID.init(uuidString:))
+        defaults.removeObject(forKey: "mockEnvironment")
+        defaults.removeObject(forKey: "mockPreviousEnvironment")
+        guard environments.contains(where: { $0.id == leftover }) else { return }
+        let wasActive = activeEnvironmentID == leftover
+        deleteEnvironment(leftover)
+        if wasActive, environments.contains(where: { $0.id == previous }) {
+            activeEnvironmentID = previous
+        }
+    }
+
     func startMock(collectionID: UUID) {
         guard let collection = collections.first(where: { $0.id == collectionID }) else { return }
         stopMock()
@@ -504,6 +528,9 @@ final class AppModel {
                     variables.append(Variable(key: variable, value: session.url))
                     let environment = APIEnvironment(name: uniqueName("Mock: \(collection.name)", among: environments.map(\.name)), variables: variables)
                     saveEnvironment(environment)
+                    // Remembered on disk, so it can be removed at the next launch if the app is force-quit.
+                    UserDefaults.standard.set(environment.id.uuidString, forKey: "mockEnvironment")
+                    UserDefaults.standard.set(activeEnvironmentID?.uuidString, forKey: "mockPreviousEnvironment")
                     activeEnvironmentID = environment.id
                     session.environmentID = environment.id
                 }
@@ -524,6 +551,8 @@ final class AppModel {
             if wasActive, environments.contains(where: { $0.id == session.previousEnvironmentID }) {
                 activeEnvironmentID = session.previousEnvironmentID
             }
+            UserDefaults.standard.removeObject(forKey: "mockEnvironment")
+            UserDefaults.standard.removeObject(forKey: "mockPreviousEnvironment")
         }
         mock = nil
     }

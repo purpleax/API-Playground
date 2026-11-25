@@ -4,8 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 and 2 are built and checked. Phase 3 (demo features) is built and its engine is
-tested, but its screens have not been tried yet. See "Not yet checked".
+Phases 1 to 3 are built. See "Not yet checked" for what has not been tried on screen.
 
 Covered by engine tests:
 
@@ -33,6 +32,11 @@ Checked by hand in the running app:
 - The environment editor, including a "This Mac only" value
 - Imported Postman test scripts running unchanged, with results and console output
 - Adding a check, and the collection runner with pass and fail per request
+- Hide Secrets across the editor, response body, headers and log
+- Pinning a response, and showing it in place of a live one
+- The mock server answering a collection with no backend running, and its temporary
+  environment being removed on quit and after a force-quit
+- A demo sequence with notes, and presentation mode with Space, arrow keys and Esc
 
 Not yet checked:
 
@@ -41,8 +45,8 @@ Not yet checked:
 - Form, multipart, GraphQL and file body editors
 - Secret variables with the real Keychain (tests use an in-memory store)
 - Editing scripts and "Save from response" rows on screen, and running a single folder
-- All phase 3 screens: Hide Secrets, pinning and showing a pinned response, the Mock Server
-  panel, the demo sequence editor, and presentation mode with its keyboard controls
+- In phase 3: the P key while presenting (its button was checked), removing a pinned
+  response, reordering demo steps, and the mock's list of requests received
 
 ### Demo features
 

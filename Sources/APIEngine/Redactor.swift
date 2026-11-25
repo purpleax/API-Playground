@@ -15,8 +15,9 @@ public struct Redactor: Sendable {
     }
 
     /// Builds a redactor from the variables and auth settings in play.
-    public init(variables: [Variable], auths: [Auth] = [], resolver: VariableResolver = VariableResolver(scopes: [])) {
-        var values: [String] = []
+    /// - Parameter extra: Further values to hide, such as a request's own API-key header.
+    public init(variables: [Variable], auths: [Auth] = [], resolver: VariableResolver = VariableResolver(scopes: []), extra: [String] = []) {
+        var values: [String] = extra
         for variable in variables where variable.secret || Self.isSensitiveName(variable.key) {
             values.append(variable.effectiveValue)
         }
@@ -58,6 +59,11 @@ public struct Redactor: Sendable {
         }
         output = Self.replace(#"\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{4,}"#, in: output) { match in
             "\(match[1]) \(Self.mask)"
+        }
+        // A URL quoted inside a body or log line: mask the values of its sensitive query parameters.
+        output = Self.replace(#"([?&])([A-Za-z0-9_.\-\[\]%]+)=([^&#\s"'<>\\]+)"#, in: output) { match in
+            guard Self.isSensitiveName(match[2].removingPercentEncoding ?? match[2]) else { return match[0] }
+            return "\(match[1])\(match[2])=\(Self.mask)"
         }
         output = Self.replace(#""([^"\\]*)"(\s*:\s*)"((?:[^"\\]|\\.)*)""#, in: output) { match in
             guard Self.isSensitiveName(match[1]), !match[3].isEmpty else { return match[0] }

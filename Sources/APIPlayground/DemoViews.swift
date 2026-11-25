@@ -266,8 +266,7 @@ struct PresentationView: View {
                     Label("Secrets hidden", systemImage: "eye.slash")
                         .foregroundStyle(.secondary)
                     Button("Exit") { model.stopPresenting() }
-                        .keyboardShortcut(.escape, modifiers: [])
-                }
+                    }
                 .padding(.horizontal, 28)
                 .padding(.top, 18)
 
@@ -309,7 +308,46 @@ struct PresentationView: View {
                     .padding(.vertical, 12)
             }
             .background(Color(nsColor: .windowBackgroundColor))
+            .onAppear { installKeyHandler() }
+            .onDisappear { removeKeyHandler() }
         }
+    }
+
+    @State private var keyMonitor: Any?
+
+    /// Presentation keys are handled directly, because a plain Space or arrow key is not a
+    /// reliable button shortcut: Space sends, the arrows move, P shows the pinned response, Esc exits.
+    private func installKeyHandler() {
+        removeKeyHandler()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let model = AppModel.shared
+            guard let step = model.presentation?.step,
+                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                  // Leave typing alone while a sheet or alert is up.
+                  event.window?.attachedSheet == nil else { return event }
+            switch event.keyCode {
+            case 49, 36, 76:  // Space, Return, Enter
+                model.send(step.requestID)
+            case 123:  // Left arrow
+                model.presentationMove(by: -1)
+            case 124:  // Right arrow
+                model.presentationMove(by: 1)
+            case 53:  // Escape
+                model.stopPresenting()
+            case 35:  // P
+                if let example = model.request(step.requestID)?.examples.first {
+                    model.showPinned(step.requestID, example)
+                }
+            default:
+                return event
+            }
+            return nil
+        }
+    }
+
+    private func removeKeyHandler() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 
     @ViewBuilder
@@ -332,6 +370,7 @@ struct PresentationView: View {
                 Spacer()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -357,7 +396,7 @@ struct PresentationView: View {
                             .foregroundStyle(.secondary)
                         if !result.tests.isEmpty {
                             let failed = result.failedTests.count
-                            Label(failed == 0 ? "\(result.tests.count) tests passed" : "\(failed) of \(result.tests.count) tests failed",
+                            Label(failed == 0 ? (result.tests.count == 1 ? "1 test passed" : "\(result.tests.count) tests passed") : "\(failed) of \(result.tests.count) tests failed",
                                   systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                                 .foregroundStyle(failed == 0 ? Color.green : Color.red)
                         }
@@ -413,7 +452,6 @@ struct PresentationView: View {
             } label: {
                 Label("Previous", systemImage: "chevron.left")
             }
-            .keyboardShortcut(.leftArrow, modifiers: [])
             .disabled(state.index == 0)
 
             Button {
@@ -421,7 +459,6 @@ struct PresentationView: View {
             } label: {
                 Label("Send", systemImage: "paperplane.fill")
             }
-            .keyboardShortcut(.space, modifiers: [])
             .buttonStyle(.borderedProminent)
 
             if let example = request.examples.first {
@@ -430,7 +467,6 @@ struct PresentationView: View {
                 } label: {
                     Label("Show Pinned", systemImage: "pin")
                 }
-                .keyboardShortcut("p", modifiers: [])
                 .help("Show the pinned response instead of calling the API")
             }
 
@@ -439,7 +475,6 @@ struct PresentationView: View {
             } label: {
                 Label("Next", systemImage: "chevron.right")
             }
-            .keyboardShortcut(.rightArrow, modifiers: [])
             .disabled(state.index >= state.steps.count - 1)
 
             Spacer()

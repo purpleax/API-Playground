@@ -19,6 +19,9 @@ import Testing
         #expect(redactor.redact("Authorization: Bearer abc.def-123") == "Authorization: Bearer \(mask)")
         #expect(redactor.redact("uses basic dXNlcjpwYXNz here") == "uses basic \(mask) here")
         #expect(redactor.redact("nothing secret here") == "nothing secret here")
+        // A URL quoted inside a JSON body.
+        #expect(redactor.redact("\"path\": \"/pets?api_key=abc123&limit=5&token=zz\",") == "\"path\": \"/pets?api_key=\(mask)&limit=5&token=\(mask)\",")
+        #expect(Redactor(variables: [], extra: ["key-live-9f8e"]).redact("echo key-live-9f8e") == "echo \(mask)")
     }
 
     @Test func masksSensitiveJSONFields() {
