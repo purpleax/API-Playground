@@ -65,8 +65,13 @@ Not yet checked:
 The interface is custom rather than standard macOS controls: a top bar in place of the
 toolbar, floating panels, colour-coded methods and status, underline tabs and
 syntax-coloured JSON. Every colour and shared control lives in
-`Sources/APIPlayground/Theme.swift`, so the palette can be changed in one place. The app is
-dark by default; View > Appearance switches to Light or Match System.
+`Sources/APIPlayground/Theme.swift`.
+
+There are eight colour themes: Aurora, Sunset, Ultraviolet, Ocean, Forest, Gold, Neon and
+Graphite. Choose one from the palette button in the top bar or View > Colour Theme. Each
+sets the accent gradient and tints the dark background. The app is dark by default; the
+same picker, or View > Appearance, switches to Light or Match System. To add a theme, add a
+`Palette` in `Theme.swift` and list it in `Palette.all`.
 
 ### Script support
 

@@ -60,6 +60,13 @@ struct APIPlaygroundApp: App {
                     withAnimation(.snappy(duration: 0.2)) { model.sidebarVisible.toggle() }
                 }
                 .keyboardShortcut("s", modifiers: [.command, .control])
+                Button("Theme…") { model.showingAppearance = true }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                Picker("Colour Theme", selection: Binding(get: { model.paletteID }, set: { model.paletteID = $0 })) {
+                    ForEach(Palette.all) { palette in
+                        Text(palette.name).tag(palette.id)
+                    }
+                }
                 Picker("Appearance", selection: Binding(get: { model.appearance }, set: { model.appearance = $0 })) {
                     ForEach(AppAppearance.allCases) { appearance in
                         Text(appearance.title).tag(appearance)
@@ -197,6 +204,14 @@ struct ContentView: View {
         .foregroundStyle(Theme.text)
         .tint(Theme.accent)
         .ignoresSafeArea(.container, edges: .top)
+        // Colours are read when a view is built, so a new theme rebuilds the window's content.
+        .id(model.paletteID)
+        .sheet(isPresented: $model.showingAppearance) {
+            AppearanceView()
+                .environment(model)
+                .themedSheet()
+                .id(model.paletteID)
+        }
         .fileImporter(isPresented: $importingPostman, allowedContentTypes: [.json, .zip], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { model.importPostmanFiles(urls) }
         }
@@ -284,6 +299,9 @@ struct TopBar: View {
 
             environmentMenu
 
+            IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
+                model.showingAppearance = true
+            }
             IconButton(systemImage: "slider.horizontal.3", help: "Edit environments and global variables") {
                 model.showingEnvironments = true
             }

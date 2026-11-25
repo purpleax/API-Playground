@@ -87,7 +87,7 @@ struct SidebarView: View {
                 .overlay(
                     Image(systemName: "shippingbox.fill")
                         .font(.system(size: 7.5, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.75))
+                        .foregroundStyle(Theme.onAccent)
                 )
             if renaming == collection.id {
                 TextField("Name", text: $renameText)

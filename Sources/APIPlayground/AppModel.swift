@@ -101,6 +101,14 @@ final class AppModel {
         }
     }
     var sidebarVisible = true
+    /// The id of the colour theme in use.
+    var paletteID = Palette.named(UserDefaults.standard.string(forKey: "palette")).id {
+        didSet {
+            UserDefaults.standard.set(paletteID, forKey: "palette")
+            Theme.palette = Palette.named(paletteID)
+        }
+    }
+    var showingAppearance = false
 
     /// Masks secrets everywhere they are displayed. Requests are still sent with real values.
     var hideSecrets = UserDefaults.standard.bool(forKey: "hideSecrets") {
@@ -153,6 +161,7 @@ final class AppModel {
         let usableVault = vault.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         vaultURL = usableVault
         store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
+        Theme.palette = Palette.named(UserDefaults.standard.string(forKey: "palette"))
         history = HistoryStore(root: Self.supportDirectory.appendingPathComponent("History", isDirectory: true))
         reload()
     }
