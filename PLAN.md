@@ -41,7 +41,8 @@ The app has its own name and visual design. It matches Insomnia's feature set, n
 | Secrets | macOS Keychain, referenced by name from files | Secrets never land in a file or a commit |
 | Variables | Postman's `{{name}}` syntax and built-in dynamic variables, used natively | Imported requests run unchanged |
 | Scripting | JavaScriptCore, with a Postman-compatible `pm` object | No bundled runtime, and imported scripts mostly run as they are |
-| Linting | `vacuum` bundled as a helper binary | Reads Spectral rulesets without needing Node |
+| Linting | A linter built into the app for now, using Spectral's rule names and ruleset format; `vacuum` as a helper binary if full Spectral compatibility is needed | The built-in linter needs no download and gives line numbers directly. vacuum reads every Spectral ruleset without needing Node |
+| gRPC | libcurl's HTTP/2, with protobuf messages converted using the server's own description | The spike showed no helper binary is needed for reflection or dynamic messages |
 | Git | The `git` command on the Mac for now, kept behind one file; libgit2 before shipping | The command needs no download and uses the sign-in Git already has. libgit2 removes the dependency on a system Git install |
 | Mock servers | In-process HTTP server on localhost | No separate process to manage |
 | Distribution | Notarised direct download, updates through Sparkle | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
@@ -166,7 +167,7 @@ Because storage is plain files from phase 1, a collection folder can be put in G
 | Postman's format has many edge cases | 1 | Test against real exports; produce an import report rather than failing silently |
 | `pm` compatibility is open-ended | 2 | Cover the commonly used parts first; flag unsupported calls in the import report |
 | The 3-way merge view is the largest piece of UI work | 5 | File-per-request storage keeps most merges conflict-free |
-| Swift has weak support for dynamic protobuf messages | 6 | May need a helper binary for gRPC reflection; decide after a spike |
+| Swift has weak support for dynamic protobuf messages | 6 | Settled: the app reads descriptors and converts messages itself. Two-way streams that react to replies would need a different HTTP/2 client |
 | Mock generation from plain-language descriptions needs a language model | 6 or later | Optional feature, using a user-supplied API key |
 
 ## Open questions

@@ -66,6 +66,21 @@ public struct HTTPResponse: Equatable, Sendable {
     /// True when the transfer was stopped before the server finished, as with an open event stream.
     public var wasCancelled = false
 
+    public init(
+        status: Int, statusText: String, httpVersion: String, headers: [HTTPHeader], body: Data,
+        timings: HTTPTimings, remoteAddress: String?, wireLog: [WireLogEntry], wasCancelled: Bool = false
+    ) {
+        self.status = status
+        self.statusText = statusText
+        self.httpVersion = httpVersion
+        self.headers = headers
+        self.body = body
+        self.timings = timings
+        self.remoteAddress = remoteAddress
+        self.wireLog = wireLog
+        self.wasCancelled = wasCancelled
+    }
+
     public func header(_ name: String) -> String? {
         headers.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
     }

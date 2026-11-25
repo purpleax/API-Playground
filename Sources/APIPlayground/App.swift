@@ -30,6 +30,8 @@ struct APIPlaygroundApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Request") { model.newRequestInCurrentCollection() }
                     .keyboardShortcut("n")
+                Button("New gRPC Request") { model.newGRPCRequest() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
                 Button("New Collection") { model.newCollection() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
@@ -61,6 +63,25 @@ struct APIPlaygroundApp: App {
                 }
                 .keyboardShortcut("r")
                 .disabled(model.selection == nil)
+                // The same choices as the gRPC method menu in the editor, reachable from the keyboard.
+                if let id = model.selection, model.request(id)?.isGRPC == true {
+                    Divider()
+                    Button("Load gRPC Methods from Server") { Task { await model.loadGRPCSchema(id) } }
+                    Menu("gRPC Method") {
+                        if let schema = model.grpcSchema(id) {
+                            ForEach(schema.services) { service in
+                                Section(service.fullName) {
+                                    ForEach(service.methods) { method in
+                                        Button("\(method.name)  ·  \(method.kind)") { model.setGRPCMethod(id, to: method) }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text("Load the server's methods first")
+                        }
+                    }
+                    Button("Fill In an Example Message") { model.fillGRPCExample(id) }
+                }
                 Divider()
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")

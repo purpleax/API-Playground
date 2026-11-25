@@ -119,7 +119,13 @@ final class AppModel {
 
     /// Responses that are still arriving, by request.
     var live: [UUID: LiveStream] = [:]
-    private var cancelFlags: [UUID: CancellationFlag] = [:]
+    var cancelFlags: [UUID: CancellationFlag] = [:]
+    /// What each gRPC server has said about its services, by address.
+    var grpcSchemas: [String: ProtoSchema] = [:]
+    /// Requests whose server is being asked to describe itself.
+    var grpcLoading: Set<UUID> = []
+    /// The last thing to tell the user about a gRPC request's schema.
+    var grpcNotes: [UUID: GRPCNote] = [:]
     /// Cookies servers have set in this workspace. Kept beside the app's private data, not in the workspace.
     var cookieJar = CookieJar()
     var showingCookies = false
@@ -505,7 +511,7 @@ final class AppModel {
         }
     }
 
-    private func record(_ result: RequestRunResult) {
+    func record(_ result: RequestRunResult) {
         pinnedShown[result.requestID] = nil
         responses[result.requestID] = .finished(result)
         if let prepared = result.prepared, let response = result.response {
@@ -517,6 +523,10 @@ final class AppModel {
     func send(_ id: UUID) {
         guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return }
         if case .sending = responses[id] { return }
+        if request.isGRPC {
+            sendGRPC(id)
+            return
+        }
         let collection = collections[index]
         let initial = runState(forCollection: index)
         responses[id] = .sending

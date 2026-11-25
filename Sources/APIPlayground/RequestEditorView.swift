@@ -34,8 +34,9 @@ struct RequestEditorView: View {
 
             // The command bar: method, address and Send in one rounded strip.
             HStack(spacing: 0) {
-                // A WebSocket has no HTTP method to choose.
-                let method = model.isWebSocket(requestID) ? "WS" : request.wrappedValue.method.uppercased()
+                // A WebSocket or gRPC request has no HTTP method to choose.
+                let isGRPC = request.wrappedValue.isGRPC
+                let method = isGRPC ? "GRPC" : model.isWebSocket(requestID) ? "WS" : request.wrappedValue.method.uppercased()
                 Menu {
                     ForEach(methodChoices(request.wrappedValue.method), id: \.self) { choice in
                         Button(choice) { request.wrappedValue.method = choice }
@@ -57,12 +58,12 @@ struct RequestEditorView: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .disabled(method == "WS")
-                .help(method == "WS" ? "This address opens a WebSocket" : "HTTP method")
+                .disabled(method == "WS" || isGRPC)
+                .help(isGRPC ? "This request calls a gRPC method" : method == "WS" ? "This address opens a WebSocket" : "HTTP method")
 
                 Rectangle().fill(Theme.stroke).frame(width: 1)
 
-                TextField("https://api.example.com/path", text: request.url)
+                TextField(isGRPC ? "grpc://localhost:50051, or grpcs:// with TLS" : "https://api.example.com/path", text: request.url)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Theme.text)
@@ -82,7 +83,11 @@ struct RequestEditorView: View {
             .padding(.top, 10)
             .padding(.bottom, 8)
 
-            ThemedTabBar(tabs: Tab.allCases.map { tabItem($0, request.wrappedValue) }, selection: $tab)
+            if request.wrappedValue.isGRPC {
+                GRPCMethodBar(requestID: requestID)
+            }
+            ThemedTabBar(tabs: tabs(for: request.wrappedValue).map { tabItem($0, request.wrappedValue) }, selection: $tab)
+                .onAppear { if request.wrappedValue.isGRPC, tab == .params { tab = .body } }
 
             switch tab {
             case .params:
@@ -107,7 +112,11 @@ struct RequestEditorView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .body:
-                BodyEditor(requestBody: request.body, requestID: requestID)
+                if request.wrappedValue.isGRPC {
+                    GRPCMessageEditor(requestID: requestID)
+                } else {
+                    BodyEditor(requestBody: request.body, requestID: requestID)
+                }
             case .auth:
                 ScrollView {
                     AuthEditor(auth: request.auth, inherited: model.effectiveAuth(requestID), hidesSecrets: model.secretsHidden, requestID: requestID)
@@ -167,6 +176,11 @@ struct RequestEditorView: View {
         }
     }
 
+    /// A gRPC request has a message and metadata, but no query parameters or scripts.
+    private func tabs(for request: RequestItem) -> [Tab] {
+        request.isGRPC ? [.body, .headers, .auth, .tests] : Tab.allCases
+    }
+
     private func methodChoices(_ current: String) -> [String] {
         Self.methods.contains(current) ? Self.methods : Self.methods + [current]
     }
@@ -177,8 +191,9 @@ struct RequestEditorView: View {
         case .params:
             return TabItem(id: tab, title: tab.rawValue, badge: count(request.params.filter(\.enabled).count))
         case .headers:
-            return TabItem(id: tab, title: tab.rawValue, badge: count(request.headers.filter(\.enabled).count))
+            return TabItem(id: tab, title: request.isGRPC ? "Metadata" : tab.rawValue, badge: count(request.headers.filter(\.enabled).count))
         case .body:
+            if request.isGRPC { return TabItem(id: tab, title: "Message") }
             return TabItem(id: tab, title: tab.rawValue, badge: request.body == .none ? nil : "•")
         case .tests:
             return TabItem(id: tab, title: tab.rawValue, badge: count(request.assertions.filter(\.enabled).count))

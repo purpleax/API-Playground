@@ -250,6 +250,12 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
     public var assertions: [Assertion]
     /// Values copied from the response into variables, for use by later requests.
     public var extractions: [Extraction]
+    /// For a gRPC request, the method to call, such as `helloworld.Greeter/SayHello`. It is
+    /// empty until one is chosen, and nil for every other kind of request. The address is
+    /// in `url`, the message in `body` as JSON, and the metadata in `headers`.
+    public var grpcMethod: String?
+
+    public var isGRPC: Bool { grpcMethod != nil }
 
     public init(
         id: UUID = UUID(),
@@ -266,8 +272,10 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
         testScript: String = "",
         examples: [SavedResponse] = [],
         assertions: [Assertion] = [],
-        extractions: [Extraction] = []
+        extractions: [Extraction] = [],
+        grpcMethod: String? = nil
     ) {
+        self.grpcMethod = grpcMethod
         self.assertions = assertions
         self.extractions = extractions
         self.id = id
@@ -302,6 +310,7 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
         examples = try c.decodeIfPresent([SavedResponse].self, forKey: .examples) ?? []
         assertions = try c.decodeIfPresent([Assertion].self, forKey: .assertions) ?? []
         extractions = try c.decodeIfPresent([Extraction].self, forKey: .extractions) ?? []
+        grpcMethod = try c.decodeIfPresent(String.self, forKey: .grpcMethod)
     }
 }
 

@@ -4,7 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 to 5 are built.
+Phases 1 to 6 are built.
 
 Covered by engine tests:
 
@@ -56,9 +56,24 @@ Checked by hand in the running app:
 - Git Sync against a remote on this Mac: the branch chip, changes with a diff, commit, a
   refused push and pull, a pull that needed choices in the merge view, push, history,
   creating and switching branches, merging a branch, abandoning a merge, and cloning
+- API specs: opening a spec with its routes listed, problems that jump to their line, a
+  ruleset that changed a rule's severity and added a custom rule, making a collection,
+  starting a mock from it, and sending a route to the mock from the spec
+- gRPC against a test server on this Mac: loading its methods by reflection, the methods
+  still being there after a restart, choosing a method, a unary call, a server stream of
+  40 messages, and a call that failed with NOT_FOUND
 
 Not yet checked:
 
+- gRPC against a real server, over TLS (`grpcs://`), with metadata or auth set in the app,
+  a client-streaming call from the app, loading a descriptor set file, the Stop button
+  on a stream, and a stream's messages appearing one by one (the test stream finished
+  too quickly to watch)
+- A failed gRPC call showing the server's message as the response body (changed after it
+  was last looked at)
+- API specs: New API Spec, Import OpenAPI Spec, deleting a spec, a JSON spec and a
+  Swagger 2.0 spec on screen, Update Collection after editing a spec, and a large real
+  spec such as Stripe's or GitHub's
 - Git Sync's "Start Tracking This Vault with Git", Discard, saving the remote address and
   identity, and the folder chooser in Clone a Repository
 - Push and pull against a real host such as GitHub (tests use a remote on this Mac)
@@ -128,6 +143,73 @@ Limits: no stash, rebase, tags or amend; a merge needs a clean workspace first; 
 inside a larger repository is not synced; and committing is refused while the mock server
 runs, because it keeps a temporary environment in the workspace.
 
+### API specs
+
+A workspace can hold OpenAPI 3.0, 3.1 and Swagger 2.0 specs, in YAML or JSON, in its `specs`
+folder. They are kept exactly as written, so they read well in Git. File > New API Spec
+starts one; File > Import OpenAPI Spec copies one in.
+
+A spec opens with its text on the left and its routes on the right. The routes update as
+you type. Each route has a send button, which sends it to one of the spec's servers (or to
+the mock, while one runs) with example values filled in. Clicking a route or a problem
+jumps to its line.
+
+- **Make Collection** makes a request for each route, grouped into a folder per tag, with
+  `{{baseUrl}}` set to the spec's first server, example parameters and bodies, each
+  documented response saved as an example, and a check on the success status. Pressing it
+  again updates the same collection; requests keep their ids and history. Edits made to
+  the generated requests are replaced.
+- **Mock Server** makes the collection and serves its documented responses.
+- **Example values** come from the spec's `example`, `examples` and `default`, and
+  otherwise are made up from the schema.
+
+Problems come from a linter built into the app. Its rules follow Spectral's `spectral:oas`
+ruleset and use the same names. File > Lint Rules edits the workspace's ruleset
+(`specs/.spectral.yaml`, in Spectral's format), which can switch rules off, change their
+severity, and add rules of its own.
+
+Limits:
+
+- The linter is not Spectral or vacuum. It has 27 of the `spectral:oas` rules; it does not
+  check examples against their schemas or the document against the full OpenAPI schema.
+- Custom rules can use these functions: truthy, falsy, defined, undefined, pattern, casing,
+  length, enumeration, alphabetical and xor. Paths can use names, `[*]`, `..` and a final
+  `~`; filters (`[?(…)]`) are not supported. A rule that needs something else is skipped,
+  and says so in the problems list.
+- A ruleset can extend `spectral:oas` only, not a file or a URL.
+- A `$ref` to another file is not followed.
+- The YAML reader covers what specs use. It does not support tags that change a value's
+  type, complex (`?`) keys, or more than one document in a file.
+- There is no word completion or schema-aware help in the editor.
+
+### gRPC
+
+File > New gRPC Request makes a request with a server address (`grpc://host:port`, or
+`grpcs://` for TLS), a method, a message written as JSON, and metadata.
+
+- **Load Methods** asks the server to describe its services (server reflection). The
+  description is remembered for that address, so it is still there offline.
+- **A descriptor set file** can be loaded for a server without reflection. Make one with
+  `protoc --include_imports --descriptor_set_out=FILE` or `buf build -o FILE`.
+- Choosing a method fills in an example message with every field.
+- The reply is shown as JSON, with the gRPC status in place of the HTTP status. Checks,
+  history and pinned responses work as for HTTP; a check on "Status" compares the gRPC
+  status code, where 0 is OK.
+- A server stream's messages are listed as they arrive, and the finished reply is a JSON
+  list of them. For a client stream, write a JSON list to send several messages.
+
+Limits:
+
+- Every request message is sent before any reply is read. A two-way stream cannot react
+  to replies as they come.
+- A `.proto` file cannot be read directly; it must be compiled to a descriptor set.
+- Compressed replies are not supported; the app asks servers not to compress.
+- `Struct`, `Value` and `Any` are shown as the plain messages they are, not in their
+  special JSON forms. Timestamps, durations and the wrapper types use theirs.
+- Scripts and "Save from response" do not run for gRPC requests, and OAuth 2 is not
+  applied to them. The collection runner does not send them correctly.
+- Calls use libcurl's HTTP/2, which macOS includes.
+
 ### Look and feel
 
 The interface is custom rather than standard macOS controls: a top bar in place of the
@@ -190,4 +272,5 @@ open "build/API Playground.app"
 | `Sources/CCurlShim` | C wrappers for the libcurl functions Swift cannot call directly. |
 | `Sources/APIPlayground` | The SwiftUI and AppKit app. |
 | `Tests/APIEngineTests` | Engine tests. HTTP tests use a local server and need no internet. |
+| `Tests/Support` | A small gRPC server, run with Node, that the gRPC tests call. Those tests are skipped where Node is not installed. |
 | `Scripts/make-app.sh` | Builds the app bundle. |

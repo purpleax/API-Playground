@@ -121,16 +121,16 @@ struct ResponseView: View {
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Self.statusColor(response.status))
+                        .fill(Self.statusColor(response.status, grpc: response.httpVersion == "gRPC"))
                         .frame(width: 7, height: 7)
-                        .shadow(color: Self.statusColor(response.status), radius: 4)
+                        .shadow(color: Self.statusColor(response.status, grpc: response.httpVersion == "gRPC"), radius: 4)
                     Text("\(response.status) \(response.statusText)".trimmingCharacters(in: .whitespaces))
                         .font(.system(size: 12.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Self.statusColor(response.status))
+                        .foregroundStyle(Self.statusColor(response.status, grpc: response.httpVersion == "gRPC"))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Self.statusColor(response.status).opacity(0.14), in: Capsule())
+                .background(Self.statusColor(response.status, grpc: response.httpVersion == "gRPC").opacity(0.14), in: Capsule())
                 .fixedSize()
                 if response.wasCancelled {
                     Chip(text: "Stopped", color: Theme.warning, mono: false)
@@ -320,8 +320,10 @@ struct ResponseView: View {
         }
     }
 
-    static func statusColor(_ status: Int) -> Color {
-        Theme.status(status)
+    /// - Parameter grpc: gRPC's status codes count up from 0 for OK, unlike HTTP's.
+    static func statusColor(_ status: Int, grpc: Bool = false) -> Color {
+        if grpc { return status == 0 ? Theme.success : Theme.danger }
+        return Theme.status(status)
     }
 
     static func duration(_ seconds: Double) -> String {
@@ -418,7 +420,7 @@ struct HistoryView: View {
                         SelectableRow(isSelected: selected == entry.id) {
                             selected = entry.id
                         } content: {
-                            Chip(text: "\(entry.status)", color: ResponseView.statusColor(entry.status))
+                            Chip(text: "\(entry.status)", color: ResponseView.statusColor(entry.status, grpc: entry.method == "GRPC"))
                             Text(entry.date.formatted(date: .abbreviated, time: .standard))
                                 .font(.system(size: 12.5))
                             Spacer()
