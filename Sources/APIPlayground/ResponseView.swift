@@ -6,7 +6,7 @@ struct ResponseView: View {
     let requestID: UUID
 
     enum Tab: String, CaseIterable, Identifiable {
-        case body = "Body", headers = "Headers", timing = "Timing", log = "Log", history = "History"
+        case body = "Body", headers = "Headers", tests = "Tests", timing = "Timing", log = "Log", history = "History"
         var id: String { rawValue }
     }
 
@@ -15,15 +15,16 @@ struct ResponseView: View {
 
     var body: some View {
         let state = model.responses[requestID]
+        let result = finished(state)
         VStack(alignment: .leading, spacing: 0) {
-            statusBar(state)
+            statusBar(result)
                 .frame(height: 30)
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
 
             Picker("Section", selection: $tab) {
                 ForEach(Tab.allCases) { tab in
-                    Text(title(tab, state)).tag(tab)
+                    Text(title(tab, result)).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -33,43 +34,55 @@ struct ResponseView: View {
             Divider()
 
             if tab == .history {
-                HistoryView(requestID: requestID, current: currentResponse(state))
-            } else {
-                switch state {
-                case nil:
-                    placeholder("Send the request to see its response", systemImage: "paperplane", detail: "Press ⌘↩ or click Send.")
-                case .sending:
-                    VStack {
-                        Spacer()
-                        ProgressView("Sending…")
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
-                case .failed(let message):
-                    placeholder("The request failed", systemImage: "exclamationmark.triangle", detail: message)
-                case .done(let response, let prepared):
-                    content(response, prepared)
+                HistoryView(requestID: requestID, current: result?.response)
+            } else if case .sending = state {
+                VStack {
+                    Spacer()
+                    ProgressView("Sending…")
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity)
+            } else if let result {
+                if tab == .tests {
+                    ScrollView {
+                        TestResultsView(result: result)
+                            .padding(12)
+                    }
+                } else if let response = result.response, let prepared = result.prepared {
+                    content(response, prepared)
+                } else if result.skipped {
+                    placeholder("The request was skipped", systemImage: "forward.end", detail: "A pre-request script called pm.execution.skipRequest().")
+                } else {
+                    placeholder("The request failed", systemImage: "exclamationmark.triangle", detail: result.error ?? "Unknown error")
+                }
+            } else {
+                placeholder("Send the request to see its response", systemImage: "paperplane", detail: "Press ⌘↩ or click Send.")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func currentResponse(_ state: ResponseState?) -> HTTPResponse? {
-        if case .done(let response, _) = state { return response }
+    private func finished(_ state: ResponseState?) -> RequestRunResult? {
+        if case .finished(let result) = state { return result }
         return nil
     }
 
-    private func title(_ tab: Tab, _ state: ResponseState?) -> String {
-        if tab == .headers, let response = currentResponse(state) {
-            return "Headers (\(response.headers.count))"
+    private func title(_ tab: Tab, _ result: RequestRunResult?) -> String {
+        guard let result else { return tab.rawValue }
+        switch tab {
+        case .headers:
+            return result.response.map { "Headers (\($0.headers.count))" } ?? tab.rawValue
+        case .tests:
+            if result.tests.isEmpty { return result.scriptError == nil ? "Tests" : "Tests !" }
+            return "Tests (\(result.tests.count - result.failedTests.count)/\(result.tests.count))"
+        default:
+            return tab.rawValue
         }
-        return tab.rawValue
     }
 
     @ViewBuilder
-    private func statusBar(_ state: ResponseState?) -> some View {
-        if case .done(let response, _) = state {
+    private func statusBar(_ result: RequestRunResult?) -> some View {
+        if let result, let response = result.response {
             HStack(spacing: 8) {
                 Text("\(response.status) \(response.statusText)")
                     .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -80,6 +93,11 @@ struct ResponseView: View {
                 pill(Self.duration(response.timings.total))
                 pill(ByteCountFormatter.string(fromByteCount: Int64(response.body.count), countStyle: .file))
                 pill(response.httpVersion)
+                if !result.tests.isEmpty || result.scriptError != nil {
+                    let failed = result.failedTests.count + (result.scriptError == nil ? 0 : 1)
+                    Label(failed == 0 ? "Tests passed" : "\(failed) failed", systemImage: failed == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(failed == 0 ? Color.green : Color.red)
+                }
                 Spacer()
             }
         } else {
@@ -151,7 +169,7 @@ struct ResponseView: View {
             }
         case .log:
             ReadOnlyCode(text: Self.logText(response.wireLog))
-        case .history:
+        case .tests, .history:
             EmptyView()
         }
     }

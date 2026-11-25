@@ -27,6 +27,8 @@ struct SidebarView: View {
                     }
                 }
                 .contextMenu {
+                    Button("Run Collection") { model.startRun(collectionID: collection.id) }
+                    Divider()
                     Button("New Request") { model.newRequest(in: collection.id) }
                     Button("New Folder") { model.newFolder(in: collection.id) }
                     Button("Rename") {
@@ -103,6 +105,8 @@ struct NodeView: View {
                 Label(folder.name, systemImage: "folder")
             }
             .contextMenu {
+                Button("Run Folder") { model.startRun(collectionID: collectionID, folderID: folder.id) }
+                Divider()
                 Button("New Request") { model.newRequest(in: collectionID, folder: folder.id) }
                 Button("New Folder") { model.newFolder(in: collectionID, parent: folder.id) }
                 Divider()

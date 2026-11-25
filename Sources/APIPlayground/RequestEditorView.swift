@@ -7,7 +7,7 @@ struct RequestEditorView: View {
     let requestID: UUID
 
     enum Tab: String, CaseIterable, Identifiable {
-        case params = "Params", headers = "Headers", body = "Body", auth = "Auth", scripts = "Scripts"
+        case params = "Params", headers = "Headers", body = "Body", auth = "Auth", tests = "Tests", scripts = "Scripts"
         var id: String { rawValue }
     }
 
@@ -93,8 +93,14 @@ struct RequestEditorView: View {
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            case .tests:
+                ScrollView {
+                    TestsEditor(assertions: request.assertions, extractions: request.extractions)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             case .scripts:
-                ScriptsView(request: request.wrappedValue)
+                ScriptsEditor(preRequest: request.preRequestScript, tests: request.testScript)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -112,6 +118,11 @@ struct RequestEditorView: View {
         case .headers:
             let count = request.headers.filter(\.enabled).count
             return count > 0 ? "Headers (\(count))" : "Headers"
+        case .tests:
+            let count = request.assertions.filter(\.enabled).count
+            return count > 0 ? "Tests (\(count))" : "Tests"
+        case .scripts:
+            return request.preRequestScript.isEmpty && request.testScript.isEmpty ? "Scripts" : "Scripts •"
         default:
             return tab.rawValue
         }
@@ -398,41 +409,29 @@ private struct AuthEditor: View {
 
 // MARK: - Scripts
 
-private struct ScriptsView: View {
-    let request: RequestItem
+private struct ScriptsEditor: View {
+    @Binding var preRequest: String
+    @Binding var tests: String
 
     var body: some View {
-        if request.preRequestScript.isEmpty && request.testScript.isEmpty {
-            VStack {
-                Text("This request has no scripts.")
-                    .foregroundStyle(.secondary)
-                    .padding(12)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            VStack(alignment: .leading, spacing: 0) {
-                Label("Scripts are kept from the import but do not run yet.", systemImage: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .padding(12)
-                Divider()
-                VSplitView {
-                    if !request.preRequestScript.isEmpty {
-                        section("Pre-request", request.preRequestScript)
-                    }
-                    if !request.testScript.isEmpty {
-                        section("Tests", request.testScript)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Scripts are JavaScript and use Postman's pm object. Collection and folder scripts run first.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(12)
+            Divider()
+            VSplitView {
+                section("Before the request is sent", $preRequest)
+                section("After the response arrives", $tests)
             }
         }
     }
 
-    private func section(_ title: String, _ text: String) -> some View {
+    private func section(_ title: String, _ text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 6)
-            ReadOnlyCode(text: text)
+            CodeTextView(text: text)
         }
-        .frame(minHeight: 60)
+        .frame(minHeight: 80)
     }
 }

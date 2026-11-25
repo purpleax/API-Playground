@@ -43,6 +43,14 @@ struct APIPlaygroundApp: App {
                 }
                 .keyboardShortcut(.return)
                 .disabled(model.selection == nil)
+                Button("Run Collection") {
+                    if let id = model.selection, let index = model.collectionIndex(containingRequest: id) {
+                        model.startRun(collectionID: model.collections[index].id)
+                    }
+                }
+                .keyboardShortcut("r")
+                .disabled(model.selection == nil)
+                Divider()
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
             }
@@ -141,16 +149,19 @@ struct ContentView: View {
             if case .success(let urls) = result { model.importPostmanFiles(urls) }
         }
         .task {
-            // A report made before the window existed (files opened at launch) is not
-            // presented by SwiftUI, so set it again once the window is up.
-            if let pending = model.notice {
-                model.notice = nil
-                try? await Task.sleep(for: .milliseconds(500))
-                model.notice = pending
-            }
+            await model.windowDidAppear()
         }
         .sheet(isPresented: $model.showingEnvironments) {
             EnvironmentsView()
+                .environment(model)
+        }
+        .sheet(isPresented: Binding(
+            get: { model.runner != nil },
+            set: { isShown in
+                if !isShown { model.closeRunner() }
+            }
+        )) {
+            RunnerView()
                 .environment(model)
         }
         .alert(item: $model.notice) { notice in

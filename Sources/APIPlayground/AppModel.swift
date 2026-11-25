@@ -6,8 +6,26 @@ import SwiftUI
 /// The result of sending one request.
 enum ResponseState {
     case sending
-    case done(HTTPResponse, PreparedRequest)
-    case failed(String)
+    case finished(RequestRunResult)
+}
+
+/// One request in a folder or collection run.
+struct RunnerRow: Identifiable {
+    let id: UUID
+    var name: String
+    var method: String
+    var isRunning = false
+    var result: RequestRunResult?
+}
+
+/// A run of every request in a folder or collection, in order.
+struct RunnerSession: Identifiable {
+    let id = UUID()
+    var title: String
+    var collectionID: UUID
+    var folderID: UUID?
+    var rows: [RunnerRow]
+    var isRunning = false
 }
 
 struct Notice: Identifiable {
@@ -25,7 +43,7 @@ final class AppModel {
 
     private(set) var store: WorkspaceStore
     private let history: HistoryStore
-    private let client = HTTPClient()
+    private let executor = RequestExecutor()
 
     var collections: [APICollection] = []
     var environments: [APIEnvironment] = []
@@ -42,6 +60,8 @@ final class AppModel {
     var historyVersion = 0
     var notice: Notice?
     var showingEnvironments = false
+    var runner: RunnerSession?
+    private var runnerTask: Task<Void, Never>?
 
     private var saveTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -49,7 +69,15 @@ final class AppModel {
 
     static var supportDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("API Playground", isDirectory: true)
+        // The test build names a different folder, so it never shares data with the real app.
+        let folder = Bundle.main.object(forInfoDictionaryKey: "APSupportFolderName") as? String ?? "API Playground"
+        return base.appendingPathComponent(folder, isDirectory: true)
+    }
+
+    /// The test build keeps its secrets apart from the real app's.
+    static var secrets: KeychainSecretStore {
+        let isTest = Bundle.main.bundleIdentifier?.hasSuffix(".test") ?? false
+        return KeychainSecretStore(service: isTest ? "com.apiplayground.secrets.test" : "com.apiplayground.secrets")
     }
 
     /// Current values are kept beside the app's other private data, never in a workspace.
@@ -70,7 +98,7 @@ final class AppModel {
         let vault = UserDefaults.standard.string(forKey: "vaultPath").map { URL(fileURLWithPath: $0, isDirectory: true) }
         let usableVault = vault.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         vaultURL = usableVault
-        store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: KeychainSecretStore(), localValues: Self.localValues)
+        store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
         history = HistoryStore(root: Self.supportDirectory.appendingPathComponent("History", isDirectory: true))
         reload()
     }
@@ -79,7 +107,7 @@ final class AppModel {
         flushSaves()
         vaultURL = url
         UserDefaults.standard.set(url?.path, forKey: "vaultPath")
-        store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: KeychainSecretStore(), localValues: Self.localValues)
+        store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
         selection = nil
         responses = [:]
         reload()
@@ -250,29 +278,93 @@ final class AppModel {
 
     // MARK: Sending
 
+    private func runState(forCollection index: Int) -> RunState {
+        RunState(
+            globals: globals,
+            collectionVariables: collections[index].variables,
+            environment: activeEnvironment?.variables ?? []
+        )
+    }
+
+    /// Saves the variables that scripts or extractions changed during a run.
+    private func keep(_ state: RunState, collectionID: UUID) {
+        if state.globals != globals { saveGlobals(state.globals) }
+        if let index = collections.firstIndex(where: { $0.id == collectionID }),
+           collections[index].variables != state.collectionVariables {
+            collections[index].variables = state.collectionVariables
+            save(collections[index])
+        }
+        if var environment = activeEnvironment, environment.variables != state.environment {
+            environment.variables = state.environment
+            saveEnvironment(environment)
+        }
+    }
+
+    private func record(_ result: RequestRunResult) {
+        responses[result.requestID] = .finished(result)
+        if let prepared = result.prepared, let response = result.response {
+            try? history.record(HistoryEntry(request: prepared, response: response), requestID: result.requestID)
+            historyVersion += 1
+        }
+    }
+
     func send(_ id: UUID) {
         guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return }
-        let prepared: PreparedRequest
-        do {
-            prepared = try RequestBuilder.prepare(
-                request, auth: collections[index].effectiveAuth(forRequest: id), resolver: resolver(forCollection: index)
-            )
-        } catch {
-            responses[id] = .failed(error.localizedDescription)
-            return
-        }
-
+        let collection = collections[index]
+        let initial = runState(forCollection: index)
         responses[id] = .sending
         Task {
-            do {
-                let response = try await client.send(prepared)
-                responses[id] = .done(response, prepared)
-                try? history.record(HistoryEntry(request: prepared, response: response), requestID: id)
-                historyVersion += 1
-            } catch {
-                responses[id] = .failed(error.localizedDescription)
-            }
+            var state = initial
+            let result = await executor.run(request, in: collection, state: &state)
+            keep(state, collectionID: collection.id)
+            record(result)
         }
+    }
+
+    // MARK: Running a folder or collection
+
+    func startRun(collectionID: UUID, folderID: UUID? = nil) {
+        guard let index = collections.firstIndex(where: { $0.id == collectionID }) else { return }
+        runnerTask?.cancel()
+        let collection = collections[index]
+        let requests = collection.requests(inFolder: folderID)
+        let folderName = folderID.flatMap { id in requests.first.flatMap { collection.folders(containingRequest: $0.id).first { $0.id == id }?.name } }
+        var session = RunnerSession(
+            title: folderName.map { "\(collection.name) / \($0)" } ?? collection.name,
+            collectionID: collectionID,
+            folderID: folderID,
+            rows: requests.map { RunnerRow(id: $0.id, name: $0.name, method: $0.method) }
+        )
+        session.isRunning = !requests.isEmpty
+        runner = session
+        let sessionID = session.id
+        let initial = runState(forCollection: index)
+
+        runnerTask = Task {
+            // One set of variables for the whole run, so a value saved by one request reaches the next.
+            var state = initial
+            for (position, request) in requests.enumerated() {
+                guard !Task.isCancelled, runner?.id == sessionID else { break }
+                runner?.rows[position].isRunning = true
+                let result = await executor.run(request, in: collection, state: &state)
+                guard runner?.id == sessionID else { break }
+                runner?.rows[position].isRunning = false
+                runner?.rows[position].result = result
+                record(result)
+            }
+            keep(state, collectionID: collectionID)
+            if runner?.id == sessionID { runner?.isRunning = false }
+        }
+    }
+
+    func stopRun() {
+        runnerTask?.cancel()
+        runner?.isRunning = false
+    }
+
+    func closeRunner() {
+        runnerTask?.cancel()
+        runner = nil
     }
 
     func historyEntries(_ id: UUID) -> [HistoryEntry] {
@@ -280,6 +372,18 @@ final class AppModel {
     }
 
     // MARK: Importing
+
+    private var windowReady = false
+    private var pendingNotice: Notice?
+
+    func windowDidAppear() async {
+        try? await Task.sleep(for: .milliseconds(500))
+        windowReady = true
+        if let pendingNotice {
+            notice = pendingNotice
+            self.pendingNotice = nil
+        }
+    }
 
     func importPostmanFiles(_ urls: [URL]) {
         var lines: [String] = []
@@ -299,7 +403,14 @@ final class AppModel {
                 lines.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
-        notice = Notice(title: "Import finished", message: lines.joined(separator: "\n"))
+        let report = Notice(title: "Import finished", message: lines.joined(separator: "\n"))
+        // SwiftUI drops an alert set before the window exists, which happens when files are
+        // opened at launch. Hold the report until the window is up.
+        if windowReady {
+            notice = report
+        } else {
+            pendingNotice = report
+        }
     }
 
     /// Adds an imported document to the workspace and returns lines for the import report.
@@ -323,7 +434,7 @@ final class AppModel {
 
             var lines = ["\(verb) collection \"\(collection.name)\": \(Self.count(report.requests, "request")), \(Self.count(report.folders, "folder")), \(Self.count(report.examples, "example")), \(Self.count(report.variables, "variable"))."]
             if report.scriptsPreserved > 0 {
-                lines.append("\(Self.count(report.scriptsPreserved, "script")) kept, but scripts do not run yet.")
+                lines.append("\(Self.count(report.scriptsPreserved, "script")) imported.")
             }
             lines.append(contentsOf: report.warnings)
             return lines

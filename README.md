@@ -4,7 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phase 1 is built. See "Not yet checked" for what has not been tried on screen.
+Phases 1 and 2 are built. See "Not yet checked" for what has not been tried on screen.
 
 Covered by engine tests:
 
@@ -17,12 +17,18 @@ Covered by engine tests:
 - Sending requests with libcurl, with per-phase timings and a wire log
 - cURL command import
 - Per-request response history and a line-by-line response diff
+- Checks on status, headers, JSON values, body text and response time, with no script
+- Saving a response value into a variable for later requests
+- Pre-request and test scripts, run in JavaScriptCore with a Postman-compatible `pm` object
+- Collection, folder and request scripts running in Postman's order
 
 Checked by hand in the running app:
 
 - Importing files and a zip, the import report, browsing, editing and sending
 - Response body, headers, timing, log, history and diff
 - The environment editor, including a "This Mac only" value
+- Imported Postman test scripts running unchanged, with results and console output
+- Adding a check, and the collection runner with pass and fail per request
 
 Not yet checked:
 
@@ -30,6 +36,19 @@ Not yet checked:
 - cURL import from the clipboard, the file-picker import, and switching to a Local Vault
 - Form, multipart, GraphQL and file body editors
 - Secret variables with the real Keychain (tests use an in-memory store)
+- Editing scripts and "Save from response" rows on screen, and running a single folder
+
+### Script support
+
+Scripts get `pm.test`, `pm.expect` (the commonly used Chai assertions), `pm.response`,
+`pm.request`, `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`,
+`console`, `btoa`/`atob`, and the older `tests[...]`, `responseBody` and `postman.*` API.
+
+Not supported yet, and reported as a script error when used: `pm.sendRequest`,
+`setNextRequest`, `require(...)` and Postman's bundled libraries such as CryptoJS, moment
+and lodash. A value a script sets is stored as a "This Mac only" value. Collection and
+folder scripts run but cannot be edited in the app yet. A script stuck in an endless loop
+is not interrupted.
 
 ## Building
 
@@ -41,10 +60,17 @@ Run the engine tests:
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ```
 
-Build the app into `build/API Playground.app`:
+Build the app into `build/API Playground.app` (quit the app first if it is running):
 
 ```bash
 Scripts/make-app.sh
+```
+
+Build a separate test copy, `build/API Playground Test.app`, with its own settings and
+data, for trying changes without touching the real app's data:
+
+```bash
+Scripts/make-app.sh debug test
 ```
 
 Open it:
