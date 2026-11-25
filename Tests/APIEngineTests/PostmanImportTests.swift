@@ -63,7 +63,7 @@ let sampleCollectionV21 = """
       "name": "Login",
       "request": {
         "method": "POST",
-        "auth": { "type": "oauth2", "oauth2": [] },
+        "auth": { "type": "digest", "digest": [] },
         "header": [],
         "body": { "mode": "urlencoded", "urlencoded": [
           { "key": "user", "value": "guy" }, { "key": "skip", "value": "1", "disabled": true } ] },
@@ -132,7 +132,7 @@ func importSampleEnvironment() throws -> APIEnvironment {
         #expect(report.examples == 1)
         #expect(report.scriptsPreserved == 2)
         #expect(report.warnings.count == 1)
-        #expect(report.warnings.first?.contains("oauth2") == true)
+        #expect(report.warnings.first?.contains("digest") == true)
     }
 
     @Test func readsRequestDetails() throws {

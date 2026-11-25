@@ -321,7 +321,7 @@ let petsBody = """
 
     @Test func chainingCarriesAValueToTheNextRequest() async throws {
         try await withServer { base in
-            let login = RequestItem(name: "Login", url: "{{base}}/login", extractions: [
+            let login = RequestItem(name: "Login", url: "{{base}}/signin", extractions: [
                 Extraction(variable: "token", source: ValueSource(kind: .header, path: "X-Echo")),
             ])
             let next = RequestItem(name: "Use", url: "{{base}}/me", headers: [KeyValue(key: "X-Token", value: "{{token}}")],

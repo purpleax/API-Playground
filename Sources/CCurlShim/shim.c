@@ -36,6 +36,11 @@ CURLcode apc_setopt_debug_cb(CURL *handle, apc_debug_cb value) {
     return curl_easy_setopt(handle, CURLOPT_DEBUGFUNCTION, value);
 }
 
+CURLcode apc_setopt_progress_cb(CURL *handle, apc_progress_cb value) {
+    // curl_off_t is a 64-bit integer on every platform this builds for, so the signatures match.
+    return curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, (curl_xferinfo_callback)value);
+}
+
 CURLcode apc_getinfo_long(CURL *handle, CURLINFO info, long *value) {
     return curl_easy_getinfo(handle, info, value);
 }

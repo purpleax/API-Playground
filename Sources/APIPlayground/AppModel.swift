@@ -1,7 +1,47 @@
 import APIEngine
 import AppKit
+import AuthenticationServices
+import CryptoKit
 import Observation
 import SwiftUI
+
+/// What is known about a response that is still arriving.
+struct LiveStream {
+    var status: Int?
+    var headers: [HTTPHeader] = []
+    var events: [ServerSentEvent] = []
+    var bytes = 0
+
+    var isEventStream: Bool {
+        headers.contains { $0.name.lowercased() == "content-type" && $0.value.lowercased().contains("text/event-stream") }
+    }
+}
+
+/// A WebSocket conversation for one request.
+struct SocketSession {
+    enum State { case disconnected, connecting, connected }
+    var state: State = .disconnected
+    var messages: [WebSocketMessage] = []
+}
+
+/// Parses an event stream as it arrives. The HTTP callbacks run off the main thread, so it locks.
+private final class StreamParser: @unchecked Sendable {
+    private var parser = ServerSentEventParser()
+    private let lock = NSLock()
+
+    func feed(_ chunk: Data) -> [ServerSentEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return parser.feed(chunk)
+    }
+}
+
+/// Tells the sign-in sheet which window to appear over.
+private final class SignInAnchor: NSObject, ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        NSApp.keyWindow ?? NSApp.windows.first ?? ASPresentationAnchor()
+    }
+}
 
 /// The result of sending one request.
 enum ResponseState {
@@ -75,7 +115,25 @@ final class AppModel {
 
     private(set) var store: WorkspaceStore
     private let history: HistoryStore
-    private let executor = RequestExecutor()
+    private let executor = RequestExecutor(tokens: OAuth2TokenStore(secrets: AppModel.secrets))
+
+    /// Responses that are still arriving, by request.
+    var live: [UUID: LiveStream] = [:]
+    private var cancelFlags: [UUID: CancellationFlag] = [:]
+    /// Cookies servers have set in this workspace. Kept beside the app's private data, not in the workspace.
+    var cookieJar = CookieJar()
+    var showingCookies = false
+    var schemas: [UUID: GraphQLSchema] = [:]
+    /// The request whose GraphQL schema is on screen.
+    var showingSchema: UUID?
+    var fetchingSchema = false
+    var sockets: [UUID: SocketSession] = [:]
+    private var socketClients: [UUID: WebSocketClient] = [:]
+    /// Bumped when an OAuth 2 token changes, so its status redraws.
+    var tokenVersion = 0
+    var fetchingToken = false
+    private var signInSession: ASWebAuthenticationSession?
+    private let signInAnchor = SignInAnchor()
 
     var collections: [APICollection] = []
     var environments: [APIEnvironment] = []
@@ -186,12 +244,13 @@ final class AppModel {
             let saved = UserDefaults.standard.string(forKey: "activeEnvironment").flatMap(UUID.init(uuidString:))
             activeEnvironmentID = environments.contains { $0.id == saved } ? saved : nil
             removeLeftoverMockEnvironment()
+            loadCookies()
         } catch {
             show("Could not open the workspace", error)
         }
     }
 
-    private func show(_ title: String, _ error: Error) {
+    fileprivate func show(_ title: String, _ error: Error) {
         notice = Notice(title: title, message: error.localizedDescription)
     }
 
@@ -346,15 +405,38 @@ final class AppModel {
     // MARK: Sending
 
     private func runState(forCollection index: Int) -> RunState {
-        RunState(
+        var state = RunState(
             globals: globals,
             collectionVariables: collections[index].variables,
             environment: activeEnvironment?.variables ?? []
         )
+        state.cookies = cookieJar
+        return state
+    }
+
+    // MARK: Cookies
+
+    private var cookieFile: URL {
+        // One jar per workspace, named by a stable hash of the workspace's location.
+        let digest = SHA256.hash(data: Data(store.root.path.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        return Self.supportDirectory.appendingPathComponent("Cookies/\(digest).json")
+    }
+
+    private func loadCookies() {
+        let data = try? Data(contentsOf: cookieFile)
+        cookieJar = data.flatMap { try? JSONDecoder().decode(CookieJar.self, from: $0) } ?? CookieJar()
+        cookieJar.removeExpired()
+    }
+
+    func setCookies(_ jar: CookieJar) {
+        cookieJar = jar
+        try? FileManager.default.createDirectory(at: cookieFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(jar).write(to: cookieFile, options: .atomic)
     }
 
     /// Saves the variables that scripts or extractions changed during a run.
     private func keep(_ state: RunState, collectionID: UUID) {
+        if state.cookies != cookieJar { setCookies(state.cookies) }
         if state.globals != globals { saveGlobals(state.globals) }
         if let index = collections.firstIndex(where: { $0.id == collectionID }),
            collections[index].variables != state.collectionVariables {
@@ -378,15 +460,210 @@ final class AppModel {
 
     func send(_ id: UUID) {
         guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return }
+        if case .sending = responses[id] { return }
         let collection = collections[index]
         let initial = runState(forCollection: index)
         responses[id] = .sending
+        live[id] = LiveStream()
+        let flag = CancellationFlag()
+        cancelFlags[id] = flag
+
+        // Show the status and any server-sent events while the response is still open.
+        let parser = StreamParser()
+        let handlers = HTTPStreamHandlers(
+            onHeaders: { status, headers in
+                Task { @MainActor in
+                    AppModel.shared.live[id]?.status = status
+                    AppModel.shared.live[id]?.headers = headers
+                }
+            },
+            onData: { chunk in
+                let events = parser.feed(chunk)
+                Task { @MainActor in
+                    AppModel.shared.live[id]?.bytes += chunk.count
+                    AppModel.shared.live[id]?.events += events
+                }
+            }
+        )
         Task {
             var state = initial
-            let result = await executor.run(request, in: collection, state: &state)
+            let result = await executor.run(request, in: collection, state: &state, handlers: handlers, cancellation: flag)
             keep(state, collectionID: collection.id)
+            cancelFlags[id] = nil
+            live[id] = nil
             record(result)
         }
+    }
+
+    /// Stops a request that is in progress. An open event stream keeps the events it had.
+    func cancel(_ id: UUID) {
+        cancelFlags[id]?.cancel()
+    }
+
+    // MARK: GraphQL
+
+    func fetchSchema(_ id: UUID) {
+        guard let prepared = preview(id), !fetchingSchema else { return }
+        fetchingSchema = true
+        Task {
+            defer { fetchingSchema = false }
+            do {
+                let response = try await executor.client.send(GraphQL.introspectionRequest(from: prepared))
+                schemas[id] = try GraphQL.parseSchema(response.body)
+                showingSchema = id
+            } catch {
+                show("Could not load the schema", error)
+            }
+        }
+    }
+
+    // MARK: OAuth 2
+
+    func oauthToken(_ id: UUID) -> OAuth2Token? {
+        _ = tokenVersion
+        return executor.tokens?.token(for: id)
+    }
+
+    func clearOAuthToken(_ id: UUID) {
+        executor.tokens?.clear(id)
+        tokenVersion += 1
+    }
+
+    /// Fetches a new token: directly for the automatic grants, or through a browser sign-in.
+    func getOAuthToken(_ config: OAuth2Config, requestID: UUID) {
+        guard let index = collectionIndex(containingRequest: requestID), !fetchingToken else { return }
+        let resolver = resolver(forCollection: index)
+        if config.grant.isAutomatic {
+            fetchingToken = true
+            executor.tokens?.clear(config.id)
+            Task {
+                defer {
+                    fetchingToken = false
+                    tokenVersion += 1
+                }
+                do {
+                    _ = try await executor.accessToken(for: config, resolver: resolver)
+                } catch {
+                    show("Could not get a token", error)
+                }
+            }
+            return
+        }
+
+        do {
+            let pkce = OAuth2.pkce()
+            let state = UUID().uuidString
+            let url = try OAuth2.authorizationURL(config, resolver: resolver, state: state, codeChallenge: config.usePKCE ? pkce.challenge : nil)
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "apiplayground") { callback, error in
+                Task { @MainActor in
+                    let model = AppModel.shared
+                    model.signInSession = nil
+                    guard let callback else {
+                        // Closing the sign-in window is not an error worth a message.
+                        if let error, (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin {
+                            model.show("Sign-in did not complete", error)
+                        }
+                        return
+                    }
+                    model.fetchingToken = true
+                    defer {
+                        model.fetchingToken = false
+                        model.tokenVersion += 1
+                    }
+                    do {
+                        let code = try OAuth2.code(fromCallback: callback, expectedState: state)
+                        let request = try OAuth2.tokenRequest(config, resolver: resolver, code: code, codeVerifier: config.usePKCE ? pkce.verifier : nil)
+                        let token = try OAuth2.parseToken(try await model.executor.client.send(request))
+                        model.executor.tokens?.save(token, for: config.id)
+                    } catch {
+                        model.show("Could not get a token", error)
+                    }
+                }
+            }
+            session.presentationContextProvider = signInAnchor
+            signInSession = session
+            session.start()
+        } catch {
+            show("Could not start sign-in", error)
+        }
+    }
+
+    // MARK: WebSockets
+
+    /// Whether a request's address, with variables filled in, is a WebSocket address.
+    func isWebSocket(_ id: UUID) -> Bool {
+        guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return false }
+        if WebSocketClient.isWebSocketURL(request.url) { return true }
+        guard request.url.contains("{{") else { return false }
+        return WebSocketClient.isWebSocketURL(resolver(forCollection: index).resolve(request.url).string)
+    }
+
+    func connectSocket(_ id: UUID) {
+        guard let prepared = preview(id), let url = URL(string: prepared.url) else {
+            sockets[id, default: SocketSession()].messages.append(WebSocketMessage(direction: .system, text: "The address is not valid."))
+            return
+        }
+        disconnectSocket(id)
+        var headers = prepared.headers.filter { $0.name.caseInsensitiveCompare("User-Agent") != .orderedSame }
+        // The handshake is an HTTP request, so stored cookies apply. Match them as http or https.
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.scheme = url.scheme?.lowercased() == "wss" ? "https" : "http"
+        if prepared.header("Cookie") == nil, let httpURL = components?.url, let cookies = cookieJar.header(for: httpURL) {
+            headers.append(HTTPHeader(name: "Cookie", value: cookies))
+        }
+        let client = WebSocketClient { event in
+            Task { @MainActor in AppModel.shared.handleSocket(event, for: id) }
+        }
+        socketClients[id] = client
+        var session = sockets[id] ?? SocketSession()
+        session.state = .connecting
+        session.messages.append(WebSocketMessage(direction: .system, text: "Connecting to \(redactor(for: id)?.url(prepared.url) ?? prepared.url)"))
+        sockets[id] = session
+        client.connect(url: url, headers: headers)
+    }
+
+    private func handleSocket(_ event: WebSocketEvent, for id: UUID) {
+        var session = sockets[id] ?? SocketSession()
+        switch event {
+        case .connected(let subprotocol):
+            session.state = .connected
+            session.messages.append(WebSocketMessage(direction: .system, text: subprotocol.map { "Connected, using \($0)" } ?? "Connected"))
+        case .message(let message):
+            session.messages.append(message)
+        case .closed(let code, let reason):
+            session.state = .disconnected
+            let detail = reason.flatMap { $0.isEmpty ? nil : ": \($0)" } ?? ""
+            session.messages.append(WebSocketMessage(direction: .system, text: "Closed (\(code))\(detail)"))
+            socketClients[id] = nil
+        case .failed(let message):
+            session.state = .disconnected
+            session.messages.append(WebSocketMessage(direction: .system, text: "Disconnected: \(message)"))
+            socketClients[id] = nil
+        }
+        // Keep the log from growing without limit on a busy socket.
+        if session.messages.count > 2000 { session.messages.removeFirst(session.messages.count - 2000) }
+        sockets[id] = session
+    }
+
+    func disconnectSocket(_ id: UUID) {
+        socketClients[id]?.close()
+    }
+
+    func sendSocketMessage(_ id: UUID, text: String) {
+        guard let client = socketClients[id], sockets[id]?.state == .connected, let index = collectionIndex(containingRequest: id) else { return }
+        let resolved = resolver(forCollection: index).resolve(text).string
+        sockets[id]?.messages.append(WebSocketMessage(direction: .sent, text: resolved))
+        Task {
+            do {
+                try await client.send(resolved)
+            } catch {
+                sockets[id]?.messages.append(WebSocketMessage(direction: .system, text: "Could not send: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    func clearSocketLog(_ id: UUID) {
+        sockets[id]?.messages = []
     }
 
     // MARK: Running a folder or collection

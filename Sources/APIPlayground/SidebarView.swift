@@ -215,7 +215,7 @@ struct NodeView: View {
             SidebarRow(depth: depth, isSelected: model.selection == request.id) {
                 model.selection = request.id
             } content: {
-                MethodBadge(method: request.method)
+                MethodBadge(method: WebSocketClient.isWebSocketURL(request.url) ? "WS" : request.method)
                 Text(request.name)
                     .font(.system(size: 12.5))
                     .foregroundStyle(model.selection == request.id ? Theme.text : Theme.textSecondary)

@@ -137,6 +137,7 @@ public enum Auth: Codable, Hashable, Sendable {
     case basic(username: String, password: String)
     case bearer(token: String)
     case apiKey(key: String, value: String, placement: APIKeyPlacement)
+    case oauth2(OAuth2Config)
 }
 
 public enum Body: Codable, Hashable, Sendable {

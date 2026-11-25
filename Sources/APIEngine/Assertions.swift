@@ -300,6 +300,8 @@ public struct RunState: Equatable, Sendable {
     public var environment: [Variable]
     /// Variables set with `pm.variables.set`. They last for one run and are never saved.
     public var locals: [String: String] = [:]
+    /// Cookies set by servers so far, sent back on later requests.
+    public var cookies = CookieJar()
 
     public init(globals: [Variable] = [], collectionVariables: [Variable] = [], environment: [Variable] = []) {
         self.globals = globals

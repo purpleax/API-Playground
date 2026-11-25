@@ -6,7 +6,7 @@ struct ResponseView: View {
     let requestID: UUID
 
     enum Tab: String, CaseIterable, Identifiable {
-        case body = "Body", headers = "Headers", tests = "Tests", timing = "Timing", log = "Log", history = "History"
+        case body = "Body", events = "Events", headers = "Headers", cookies = "Cookies", tests = "Tests", timing = "Timing", log = "Log", history = "History"
         var id: String { rawValue }
     }
 
@@ -24,10 +24,19 @@ struct ResponseView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 6)
 
-            ThemedTabBar(tabs: Tab.allCases.map { tabItem($0, result) }, selection: $tab)
+            let stream = model.live[requestID]
+            let tabs = visibleTabs(result, stream)
+            ThemedTabBar(tabs: tabs.map { tabItem($0, result, stream) }, selection: $tab)
+                .onChange(of: tabs) { _, now in
+                    // Jump to the events when a stream starts, and off a tab that has gone away.
+                    if now.contains(.events), tab == .body { tab = .events }
+                    if !now.contains(tab) { tab = .body }
+                }
 
             if tab == .history {
                 HistoryView(requestID: requestID, current: result?.response, redactor: redactor)
+            } else if case .sending = state, let stream, stream.isEventStream {
+                EventListView(events: stream.events, redactor: redactor, isLive: true)
             } else if case .sending = state {
                 VStack(spacing: 12) {
                     Spacer()
@@ -65,9 +74,32 @@ struct ResponseView: View {
         return nil
     }
 
-    private func tabItem(_ tab: Tab, _ result: RequestRunResult?) -> TabItem<Tab> {
+    /// Events and Cookies appear only for a response that has them.
+    private func visibleTabs(_ result: RequestRunResult?, _ stream: LiveStream?) -> [Tab] {
+        let response = result?.response
+        let isEventStream = stream?.isEventStream == true
+            || response?.header("Content-Type")?.lowercased().contains("text/event-stream") == true
+        let setsCookies = response?.headers.contains { $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame } == true
+        return Tab.allCases.filter { tab in
+            switch tab {
+            case .events: return isEventStream
+            case .cookies: return setsCookies
+            default: return true
+            }
+        }
+    }
+
+    private func tabItem(_ tab: Tab, _ result: RequestRunResult?, _ stream: LiveStream?) -> TabItem<Tab> {
+        if tab == .events, let stream {
+            return TabItem(id: tab, title: tab.rawValue, badge: String(stream.events.count), badgeColor: Theme.success)
+        }
         guard let result else { return TabItem(id: tab, title: tab.rawValue) }
         switch tab {
+        case .events:
+            return TabItem(id: tab, title: tab.rawValue, badge: result.response.map { String(ServerSentEventParser.events(in: $0.body).count) })
+        case .cookies:
+            let count = result.response?.headers.filter { $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame }.count ?? 0
+            return TabItem(id: tab, title: tab.rawValue, badge: String(count))
         case .headers:
             return TabItem(id: tab, title: tab.rawValue, badge: result.response.map { String($0.headers.count) })
         case .tests:
@@ -100,6 +132,10 @@ struct ResponseView: View {
                 .padding(.vertical, 5)
                 .background(Self.statusColor(response.status).opacity(0.14), in: Capsule())
                 .fixedSize()
+                if response.wasCancelled {
+                    Chip(text: "Stopped", color: Theme.warning, mono: false)
+                        .help("This response was stopped before the server finished sending it.")
+                }
                 pill(ByteCountFormatter.string(fromByteCount: Int64(response.body.count), countStyle: .file))
                 if let name = model.pinnedShown[requestID] {
                     Label("Pinned: \(name)", systemImage: "pin.fill")
@@ -129,6 +165,22 @@ struct ResponseView: View {
                     }
                 }
                 pinnedMenu
+            }
+        } else if let stream = model.live[requestID], let status = stream.status {
+            // The response has started but not finished: an event stream, or a slow download.
+            HStack(spacing: 8) {
+                Chip(text: "\(status)", color: Self.statusColor(status))
+                if stream.isEventStream {
+                    HStack(spacing: 5) {
+                        Circle().fill(Theme.success).frame(width: 7, height: 7).shadow(color: Theme.success, radius: 4)
+                        Text("Streaming").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.success)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Theme.success.opacity(0.13), in: Capsule())
+                }
+                pill(ByteCountFormatter.string(fromByteCount: Int64(stream.bytes), countStyle: .file))
+                Spacer()
             }
         } else {
             HStack {
@@ -253,6 +305,16 @@ struct ResponseView: View {
             }
         case .log:
             ReadOnlyCode(text: Self.logText(response.wireLog, redactor: redactor), syntax: .log)
+        case .events:
+            EventListView(events: ServerSentEventParser.events(in: response.body), redactor: redactor)
+        case .cookies:
+            ScrollView {
+                let cookies = response.headers
+                    .filter { $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame }
+                    .compactMap { header in URL(string: prepared.url).flatMap { CookieJar.parse(header.value, from: $0) } }
+                CookieRows(cookies: cookies, redactor: redactor)
+                    .padding(.vertical, 6)
+            }
         case .tests, .history:
             EmptyView()
         }

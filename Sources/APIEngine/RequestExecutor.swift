@@ -34,14 +34,45 @@ public struct RequestRunResult: Equatable, Sendable {
 public struct RequestExecutor: Sendable {
     public var client: HTTPClient
     public var options: HTTPOptions
+    /// Where OAuth 2 tokens are kept. Without it, requests that use OAuth 2 cannot run.
+    public var tokens: OAuth2TokenStore?
 
-    public init(client: HTTPClient = HTTPClient(), options: HTTPOptions = HTTPOptions()) {
+    public init(client: HTTPClient = HTTPClient(), options: HTTPOptions = HTTPOptions(), tokens: OAuth2TokenStore? = nil) {
         self.client = client
         self.options = options
+        self.tokens = tokens
+    }
+
+    /// Returns a usable access token: the stored one, a refreshed one, or a newly fetched one.
+    public func accessToken(for config: OAuth2Config, resolver: VariableResolver) async throws -> OAuth2Token {
+        guard let tokens else { throw OAuth2Error.needsSignIn }
+        let stored = tokens.token(for: config.id)
+        if let stored, !stored.isExpired() { return stored }
+
+        if let refreshToken = stored?.refreshToken {
+            let request = try OAuth2.refreshRequest(config, resolver: resolver, refreshToken: refreshToken)
+            if let response = try? await client.send(request, options: options), var fresh = try? OAuth2.parseToken(response) {
+                // A server may omit the refresh token when it has not changed.
+                fresh.refreshToken = fresh.refreshToken ?? refreshToken
+                tokens.save(fresh, for: config.id)
+                return fresh
+            }
+        }
+        guard config.grant.isAutomatic else { throw OAuth2Error.needsSignIn }
+        let response = try await client.send(try OAuth2.tokenRequest(config, resolver: resolver), options: options)
+        let token = try OAuth2.parseToken(response)
+        tokens.save(token, for: config.id)
+        return token
     }
 
     /// - Parameter state: The variables to use. Scripts and extractions change them in place.
-    public func run(_ item: RequestItem, in collection: APICollection, state: inout RunState) async -> RequestRunResult {
+    /// - Parameters:
+    ///   - handlers: Optional callbacks for watching the response arrive.
+    ///   - cancellation: Set this to stop the request while it is in progress.
+    public func run(
+        _ item: RequestItem, in collection: APICollection, state: inout RunState,
+        handlers: HTTPStreamHandlers = HTTPStreamHandlers(), cancellation: CancellationFlag? = nil
+    ) async -> RequestRunResult {
         var result = RequestRunResult(requestID: item.id)
         var request = item
         state.locals = [:]
@@ -81,25 +112,40 @@ public struct RequestExecutor: Sendable {
         }
 
         // 2. Send.
-        let prepared: PreparedRequest
+        var prepared: PreparedRequest
         do {
-            prepared = try RequestBuilder.prepare(
-                request, auth: collection.effectiveAuth(forRequest: item.id), resolver: state.resolver
-            )
+            var auth = collection.effectiveAuth(forRequest: item.id)
+            if case .oauth2(let config) = auth {
+                let token = try await accessToken(for: config, resolver: state.resolver)
+                let prefix = config.headerPrefix.trimmingCharacters(in: .whitespaces)
+                auth = prefix.isEmpty || prefix == "Bearer"
+                    ? .bearer(token: token.accessToken)
+                    : .apiKey(key: "Authorization", value: "\(prefix) \(token.accessToken)", placement: .header)
+            }
+            prepared = try RequestBuilder.prepare(request, auth: auth, resolver: state.resolver)
         } catch {
             result.error = error.localizedDescription
             return result
+        }
+        // Send stored cookies, unless the request sets its own Cookie header.
+        let url = URL(string: prepared.url)
+        if prepared.header("Cookie") == nil, let url, let cookies = state.cookies.header(for: url) {
+            prepared.headers.append(HTTPHeader(name: "Cookie", value: cookies))
         }
         result.prepared = prepared
 
         let response: HTTPResponse
         do {
-            response = try await client.send(prepared, options: options)
+            response = try await client.send(prepared, options: options, handlers: handlers, cancellation: cancellation)
         } catch {
             result.error = error.localizedDescription
             return result
         }
         result.response = response
+        if let url {
+            let setCookies = response.headers.filter { $0.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame }.map(\.value)
+            state.cookies.store(setCookieHeaders: setCookies, from: url)
+        }
 
         // 3. Extractions run first, so assertions and scripts can use the saved values.
         for extraction in item.extractions where extraction.enabled && !extraction.variable.isEmpty {

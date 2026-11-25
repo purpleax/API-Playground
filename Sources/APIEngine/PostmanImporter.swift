@@ -356,6 +356,29 @@ public enum PostmanImporter {
         case "apikey":
             let placement: APIKeyPlacement = settings["in"] == "query" ? .query : .header
             return .apiKey(key: settings["key"] ?? "", value: settings["value"] ?? "", placement: placement)
+        case "oauth2":
+            var config = OAuth2Config(
+                tokenURL: settings["accessTokenUrl"] ?? "",
+                authURL: settings["authUrl"] ?? "",
+                clientID: settings["clientId"] ?? "",
+                clientSecret: settings["clientSecret"] ?? "",
+                scope: settings["scope"] ?? "",
+                username: settings["username"] ?? "",
+                password: settings["password"] ?? "",
+                clientAuthInBody: settings["client_authentication"] == "body",
+                headerPrefix: settings["headerPrefix"].flatMap { $0.isEmpty ? nil : $0 } ?? "Bearer"
+            )
+            switch settings["grant_type"] {
+            case "client_credentials": config.grant = .clientCredentials
+            case "password_credentials": config.grant = .password
+            case "authorization_code": config.usePKCE = false; config.grant = .authorizationCode
+            case "authorization_code_with_pkce": config.grant = .authorizationCode
+            case nil: config.grant = config.authURL.isEmpty ? .clientCredentials : .authorizationCode
+            case let other?:
+                report.warnings.append("\(path): OAuth 2 grant type \"\(other)\" is not supported; it was set to client credentials.")
+            }
+            // Postman exports may carry a token it already fetched. It is not imported; get a fresh one here.
+            return .oauth2(config)
         default:
             report.warnings.append("\(path): auth type \"\(type)\" is not supported yet; it was set to no auth.")
             return .none

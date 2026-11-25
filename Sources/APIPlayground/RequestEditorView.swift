@@ -65,16 +65,12 @@ struct RequestEditorView: View {
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, 12)
-                    .onSubmit { model.send(requestID) }
+                    .onSubmit {
+                        if model.isWebSocket(requestID) { model.connectSocket(requestID) } else { model.send(requestID) }
+                    }
 
-                Button {
-                    model.send(requestID)
-                } label: {
-                    Label("Send", systemImage: "paperplane.fill")
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .padding(.trailing, 6)
-                .help("Send the request (⌘↩)")
+                primaryAction
+                    .padding(.trailing, 6)
             }
             .frame(height: 40)
             .background(Theme.raised)
@@ -109,10 +105,10 @@ struct RequestEditorView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .body:
-                BodyEditor(requestBody: request.body)
+                BodyEditor(requestBody: request.body, requestID: requestID)
             case .auth:
                 ScrollView {
-                    AuthEditor(auth: request.auth, inherited: model.effectiveAuth(requestID), hidesSecrets: model.secretsHidden)
+                    AuthEditor(auth: request.auth, inherited: model.effectiveAuth(requestID), hidesSecrets: model.secretsHidden, requestID: requestID)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -127,6 +123,46 @@ struct RequestEditorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Send for an HTTP request, Stop while one is in progress, and Connect or Disconnect for a WebSocket.
+    @ViewBuilder
+    private var primaryAction: some View {
+        if model.isWebSocket(requestID) {
+            let state = model.sockets[requestID]?.state ?? .disconnected
+            if state == .disconnected {
+                Button {
+                    model.connectSocket(requestID)
+                } label: {
+                    Label("Connect", systemImage: "bolt.horizontal.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .help("Open the WebSocket (⌘↩)")
+            } else {
+                Button(role: .destructive) {
+                    model.disconnectSocket(requestID)
+                } label: {
+                    Label("Disconnect", systemImage: "xmark")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+        } else if case .sending = model.responses[requestID] {
+            Button(role: .destructive) {
+                model.cancel(requestID)
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .help("Stop this request. An open event stream keeps the events it received.")
+        } else {
+            Button {
+                model.send(requestID)
+            } label: {
+                Label("Send", systemImage: "paperplane.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .help("Send the request (⌘↩)")
+        }
     }
 
     private func methodChoices(_ current: String) -> [String] {
@@ -183,7 +219,9 @@ private enum BodyKind: String, CaseIterable, Identifiable {
 }
 
 private struct BodyEditor: View {
+    @Environment(AppModel.self) private var model
     @Binding var requestBody: APIEngine.Body
+    let requestID: UUID
 
     private static let contentTypes: [(label: String, value: String?)] = [
         ("JSON", "application/json"), ("XML", "application/xml"), ("Text", "text/plain"),
@@ -219,6 +257,20 @@ private struct BodyEditor: View {
                     .fixedSize()
                 }
                 Spacer()
+                if case .graphQL = requestBody {
+                    if model.fetchingSchema { ProgressView().controlSize(.small) }
+                    Button {
+                        if model.schemas[requestID] != nil { model.showingSchema = requestID } else { model.fetchSchema(requestID) }
+                    } label: {
+                        Label("Schema", systemImage: "list.bullet.indent")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(model.fetchingSchema)
+                    .help("Ask the server to describe its schema, then browse its types and fields")
+                    if model.schemas[requestID] != nil {
+                        IconButton(systemImage: "arrow.clockwise", help: "Fetch the schema again") { model.fetchSchema(requestID) }
+                    }
+                }
             }
             .padding(12)
 
@@ -342,7 +394,7 @@ private struct FormFieldEditor: View {
 // MARK: - Auth
 
 private enum AuthKind: String, CaseIterable, Identifiable {
-    case inherit = "Inherit from parent", none = "No auth", basic = "Basic", bearer = "Bearer token", apiKey = "API key"
+    case inherit = "Inherit from parent", none = "No auth", basic = "Basic", bearer = "Bearer token", apiKey = "API key", oauth2 = "OAuth 2"
     var id: String { rawValue }
 
     init(_ auth: Auth) {
@@ -352,6 +404,7 @@ private enum AuthKind: String, CaseIterable, Identifiable {
         case .basic: self = .basic
         case .bearer: self = .bearer
         case .apiKey: self = .apiKey
+        case .oauth2: self = .oauth2
         }
     }
 
@@ -362,6 +415,7 @@ private enum AuthKind: String, CaseIterable, Identifiable {
         case .basic: return .basic(username: "", password: "")
         case .bearer: return .bearer(token: "")
         case .apiKey: return .apiKey(key: "", value: "", placement: .header)
+        case .oauth2: return .oauth2(OAuth2Config())
         }
     }
 }
@@ -371,6 +425,7 @@ private struct AuthEditor: View {
     /// What "inherit" resolves to for this request.
     let inherited: Auth
     var hidesSecrets = false
+    let requestID: UUID
 
     /// A field for a secret part of the auth settings: dots while secrets are hidden,
     /// unless the value is only a {{variable}}, which reveals nothing.
@@ -422,6 +477,8 @@ private struct AuthEditor: View {
                         Text("Query parameter").tag(APIKeyPlacement.query)
                     }
                 }
+            case .oauth2(let config):
+                OAuth2Editor(config: Binding(get: { config }, set: { auth = .oauth2($0) }), requestID: requestID, hidesSecrets: hidesSecrets)
             }
             if auth != .inherit, auth != Auth.none {
                 Text("Use a {{variable}} for the secret part and mark that variable as secret, so it stays out of files.")
@@ -440,6 +497,7 @@ private struct AuthEditor: View {
         case .bearer: return "a Bearer token"
         case .apiKey(let key, _, let placement):
             return "API key \(key) in the \(placement == .header ? "headers" : "query")"
+        case .oauth2(let config): return "OAuth 2 (\(config.grant.label.lowercased()))"
         }
     }
 }

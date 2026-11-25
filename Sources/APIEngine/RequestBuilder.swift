@@ -89,6 +89,9 @@ public enum RequestBuilder {
         switch auth {
         case .inherit, .none:
             break
+        case .oauth2:
+            // The executor swaps OAuth 2 for the token it fetched before calling this.
+            break
         case .basic(let username, let password):
             if !hasHeader("Authorization") {
                 let token = Data("\(resolve(username)):\(resolve(password))".utf8).base64EncodedString()

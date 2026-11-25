@@ -40,7 +40,9 @@ struct APIPlaygroundApp: App {
             }
             CommandMenu("Request") {
                 Button("Send") {
-                    if let id = model.selection { model.send(id) }
+                    if let id = model.selection {
+                        if model.isWebSocket(id) { model.connectSocket(id) } else { model.send(id) }
+                    }
                 }
                 .keyboardShortcut(.return)
                 .disabled(model.selection == nil)
@@ -54,6 +56,7 @@ struct APIPlaygroundApp: App {
                 Divider()
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
+                Button("Cookies…") { model.showingCookies = true }
             }
             CommandGroup(after: .sidebar) {
                 Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
@@ -168,8 +171,14 @@ struct ContentView: View {
                     .padding(.trailing, 5)
                     .padding(.vertical, 10)
                     .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-                ResponseView(requestID: id)
-                    .card()
+                Group {
+                    if model.isWebSocket(id) {
+                        WebSocketView(requestID: id)
+                    } else {
+                        ResponseView(requestID: id)
+                    }
+                }
+                .card()
                     .padding(.leading, 5)
                     .padding(.trailing, 10)
                     .padding(.vertical, 10)
@@ -227,6 +236,23 @@ struct ContentView: View {
             SequenceEditorView(reference: reference)
                 .environment(model)
                 .themedSheet()
+        }
+        .sheet(isPresented: $model.showingCookies) {
+            CookieManagerView()
+                .environment(model)
+                .themedSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { model.showingSchema != nil },
+            set: { isShown in
+                if !isShown { model.showingSchema = nil }
+            }
+        )) {
+            if let id = model.showingSchema, let schema = model.schemas[id] {
+                SchemaView(schema: schema)
+                    .environment(model)
+                    .themedSheet()
+            }
         }
         .sheet(isPresented: $model.showingEnvironments) {
             EnvironmentsView()

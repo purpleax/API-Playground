@@ -58,6 +58,7 @@ enum Theme {
         case "PUT": return info
         case "PATCH": return violet
         case "DELETE": return danger
+        case "WS": return accentAlt
         default: return textSecondary
         }
     }

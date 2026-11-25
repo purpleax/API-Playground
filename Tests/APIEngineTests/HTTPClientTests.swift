@@ -57,7 +57,10 @@ final class EchoServer: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, isComplete, error in
             var buffer = buffer
             if let data { buffer.append(data) }
-            if let response = respond(to: buffer) {
+            let head = String(decoding: buffer.prefix(64), as: UTF8.self)
+            if head.hasPrefix("GET /sse"), buffer.range(of: Data("\r\n\r\n".utf8)) != nil {
+                stream(on: connection, forever: head.hasPrefix("GET /sse-forever"))
+            } else if let response = respond(to: buffer) {
                 connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
             } else if isComplete || error != nil {
                 connection.cancel()
@@ -66,6 +69,26 @@ final class EchoServer: @unchecked Sendable {
             }
         }
     }
+
+    /// Sends a few server-sent events a moment apart, then closes, or keeps going until the client leaves.
+    private func stream(on connection: NWConnection, forever: Bool) {
+        connection.send(content: Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in })
+        func send(_ index: Int) {
+            let event = index == 2 ? "event: update\nid: \(index)\ndata: {\"n\": \(index)}\n\n" : ": keep-alive\ndata: tick \(index)\n\n"
+            connection.send(content: Data(event.utf8), completion: .contentProcessed { [self] error in
+                if error != nil {
+                    connection.cancel()
+                } else if index < 3 || forever {
+                    queue.asyncAfter(deadline: .now() + 0.05) { send(index + 1) }
+                } else {
+                    connection.cancel()
+                }
+            })
+        }
+        send(1)
+    }
+
+    private var tokensIssued = 0
 
     /// Returns nil until the whole request has arrived.
     private func respond(to buffer: Data) -> Data? {
@@ -87,6 +110,23 @@ final class EchoServer: @unchecked Sendable {
 
         if path.hasPrefix("/redirect") {
             return Data("HTTP/1.1 302 Found\r\nLocation: /landed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+        }
+        if path.hasPrefix("/login") {
+            return Data("HTTP/1.1 200 OK\r\nSet-Cookie: session=abc123; Path=/; HttpOnly\r\nSet-Cookie: admin=1; Path=/admin\r\nSet-Cookie: gone=1; Max-Age=0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+        }
+        if path.hasPrefix("/token") {
+            let form = String(decoding: body.prefix(length), as: UTF8.self)
+            var json: String
+            if form.contains("grant_type=refresh_token") {
+                json = "{\"access_token\": \"refreshed\", \"token_type\": \"Bearer\", \"expires_in\": \"3600\"}"
+            } else if form.contains("client_secret=wrong") || headers["authorization"] == "Basic " + Data("app:wrong".utf8).base64EncodedString() {
+                json = "{\"error\": \"invalid_client\", \"error_description\": \"Bad secret\"}"
+                return Data("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nConnection: close\r\n\r\n\(json)".utf8)
+            } else {
+                tokensIssued += 1
+                json = "{\"access_token\": \"tok-\(tokensIssued)\", \"token_type\": \"Bearer\", \"expires_in\": 3600, \"refresh_token\": \"r-1\", \"form\": \"\(form)\", \"auth\": \"\(headers["authorization"] ?? "")\"}"
+            }
+            return Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(json.utf8.count)\r\nConnection: close\r\n\r\n\(json)".utf8)
         }
         if path.hasPrefix("/status/404") {
             return Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)

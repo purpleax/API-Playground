@@ -34,6 +34,9 @@ public struct Redactor: Sendable {
                 values.append(resolver.resolve(token).string)
             case .apiKey(_, let value, _):
                 values.append(resolver.resolve(value).string)
+            case .oauth2(let config):
+                values.append(resolver.resolve(config.clientSecret).string)
+                values.append(resolver.resolve(config.password).string)
             }
         }
         self.init(secrets: values)
