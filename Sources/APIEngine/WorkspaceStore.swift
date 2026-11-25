@@ -92,7 +92,7 @@ public struct WorkspaceStore: Sendable {
     private func stripSecrets(_ variables: [Variable], owner: String) -> [Variable] {
         var current: [String: String] = [:]
         for variable in variables where !variable.secret {
-            if let value = variable.currentValue, !value.isEmpty { current[variable.key] = value }
+            if let value = variable.currentValue { current[variable.key] = value }
         }
         localValues?.set(current, owner: owner)
 

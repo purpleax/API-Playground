@@ -371,7 +371,9 @@ func importSampleEnvironment() throws -> APIEnvironment {
 @Suite struct CurrentValues {
     @Test func currentValueOverridesButSecretsIgnoreIt() {
         #expect(Variable(key: "a", value: "shared", currentValue: "mine").effectiveValue == "mine")
-        #expect(Variable(key: "a", value: "shared", currentValue: "").effectiveValue == "shared")
+        // An empty current value is still an override: a script may clear a token on purpose.
+        #expect(Variable(key: "a", value: "shared", currentValue: "").effectiveValue == "")
+        #expect(Variable(key: "a", value: "shared").effectiveValue == "shared")
         #expect(Variable(key: "a", value: "s", secret: true, currentValue: "mine").effectiveValue == "s")
         let resolver = VariableResolver(environment: [Variable(key: "host", value: "shared", currentValue: "mine")])
         #expect(resolver.resolve("{{host}}").string == "mine")

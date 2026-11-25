@@ -101,7 +101,7 @@ public struct Variable: Codable, Hashable, Identifiable, Sendable {
 
     /// The value requests actually use.
     public var effectiveValue: String {
-        if !secret, let currentValue, !currentValue.isEmpty { return currentValue }
+        if !secret, let currentValue { return currentValue }
         return value
     }
 
@@ -182,6 +182,10 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
     public var preRequestScript: String
     public var testScript: String
     public var examples: [SavedResponse]
+    /// Checks made against the response without writing a script.
+    public var assertions: [Assertion]
+    /// Values copied from the response into variables, for use by later requests.
+    public var extractions: [Extraction]
 
     public init(
         id: UUID = UUID(),
@@ -196,8 +200,12 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
         description: String = "",
         preRequestScript: String = "",
         testScript: String = "",
-        examples: [SavedResponse] = []
+        examples: [SavedResponse] = [],
+        assertions: [Assertion] = [],
+        extractions: [Extraction] = []
     ) {
+        self.assertions = assertions
+        self.extractions = extractions
         self.id = id
         self.name = name
         self.method = method
@@ -228,6 +236,8 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
         preRequestScript = try c.decodeIfPresent(String.self, forKey: .preRequestScript) ?? ""
         testScript = try c.decodeIfPresent(String.self, forKey: .testScript) ?? ""
         examples = try c.decodeIfPresent([SavedResponse].self, forKey: .examples) ?? []
+        assertions = try c.decodeIfPresent([Assertion].self, forKey: .assertions) ?? []
+        extractions = try c.decodeIfPresent([Extraction].self, forKey: .extractions) ?? []
     }
 }
 
@@ -416,6 +426,38 @@ extension APICollection {
             return false
         }
         return remove(&items)
+    }
+
+    /// The folders a request sits in, outermost first.
+    public func folders(containingRequest id: UUID) -> [Folder] {
+        func find(_ nodes: [Node], path: [Folder]) -> [Folder]? {
+            for node in nodes {
+                switch node {
+                case .request(let r) where r.id == id:
+                    return path
+                case .folder(let f):
+                    if let found = find(f.items, path: path + [f]) { return found }
+                default:
+                    continue
+                }
+            }
+            return nil
+        }
+        return find(items, path: []) ?? []
+    }
+
+    /// Every request under a folder, in order, or every request in the collection when `folderID` is nil.
+    public func requests(inFolder folderID: UUID?) -> [RequestItem] {
+        guard let folderID else { return allRequests }
+        func find(_ nodes: [Node]) -> Folder? {
+            for case .folder(let f) in nodes {
+                if f.id == folderID { return f }
+                if let found = find(f.items) { return found }
+            }
+            return nil
+        }
+        guard let folder = find(items) else { return [] }
+        return APICollection(items: folder.items).allRequests
     }
 
     /// Carries ids over from an earlier version of this collection, matching folders and
