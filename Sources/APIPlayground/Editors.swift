@@ -128,6 +128,7 @@ struct VariableEditor: View {
                     }
                     Toggle(isOn: $variable.secret) {
                         Image(systemName: variable.secret ? "lock.fill" : "lock.open")
+                            .accessibilityLabel("Secret")
                     }
                     .toggleStyle(.button)
                     .help("Secret values are kept in the Keychain, not in files")

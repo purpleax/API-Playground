@@ -280,5 +280,7 @@ import Testing
     @Test func prettyJSONNormalisesLayout() {
         #expect(LineDiff.prettyJSON(Data("{\"b\":1,\"a\":[1,2]}".utf8)) == LineDiff.prettyJSON(Data("{ \"a\": [1, 2], \"b\": 1 }".utf8)))
         #expect(LineDiff.prettyJSON(Data("<html>".utf8)) == nil)
+        // No space before the colon, and a " : " inside a key or value is left alone.
+        #expect(LineDiff.prettyJSON(Data("{\"a \\\" : b\":\"x : y\"}".utf8)) == "{\n  \"a \\\" : b\": \"x : y\"\n}")
     }
 }

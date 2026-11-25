@@ -134,6 +134,31 @@ public enum LineDiff {
                 withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes, .fragmentsAllowed]
               )
         else { return nil }
-        return String(data: pretty, encoding: .utf8)
+        return String(data: pretty, encoding: .utf8).map(tightenColons)
+    }
+
+    /// JSONSerialization writes `"key" : value`. The usual style has no space before the colon.
+    static func tightenColons(_ json: String) -> String {
+        json.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map { line -> String in
+            let indent = line.prefix { $0 == " " }
+            var rest = line.dropFirst(indent.count)
+            guard rest.first == "\"" else { return String(line) }
+            // Walk to the closing quote of the key, skipping escaped characters.
+            var key = "\""
+            rest = rest.dropFirst()
+            while let c = rest.first {
+                key.append(c)
+                rest = rest.dropFirst()
+                if c == "\\", let escaped = rest.first {
+                    key.append(escaped)
+                    rest = rest.dropFirst()
+                } else if c == "\"" {
+                    break
+                }
+            }
+            guard rest.hasPrefix(" : ") else { return String(line) }
+            return indent + key + ": " + rest.dropFirst(3)
+        }
+        .joined(separator: "\n")
     }
 }

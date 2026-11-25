@@ -182,8 +182,9 @@ struct ResponseView: View {
             case .requestHeader, .requestData: prefix = "> "
             case .responseHeader, .responseData: prefix = "< "
             }
-            return entry.text.split(separator: "\n", omittingEmptySubsequences: false)
-                .map { prefix + $0.trimmingCharacters(in: .newlines) }
+            // "\r\n" is a single Character in Swift, so split on any newline rather than on "\n".
+            return entry.text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
+                .map { prefix + $0 }
                 .joined(separator: "\n")
         }
         .joined(separator: "\n")
@@ -320,14 +321,14 @@ struct DiffView: View {
     let lines: [DiffLine]
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
+        ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    HStack(spacing: 6) {
+                    HStack(alignment: .top, spacing: 6) {
                         Text(marker(line.kind))
                             .frame(width: 12)
                         Text(line.text.isEmpty ? " " : line.text)
-                        Spacer(minLength: 0)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 1)

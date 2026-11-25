@@ -16,7 +16,7 @@ Working and covered by tests:
 - cURL command import
 - Per-request response history and a line-by-line response diff
 
-Built but not yet checked on screen:
+Checked by hand in the running app:
 
 - The app window: collection sidebar, request editor, response viewer, environment editor
 
