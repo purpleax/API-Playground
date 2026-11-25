@@ -34,7 +34,8 @@ struct RequestEditorView: View {
 
             // The command bar: method, address and Send in one rounded strip.
             HStack(spacing: 0) {
-                let method = request.wrappedValue.method.uppercased()
+                // A WebSocket has no HTTP method to choose.
+                let method = model.isWebSocket(requestID) ? "WS" : request.wrappedValue.method.uppercased()
                 Menu {
                     ForEach(methodChoices(request.wrappedValue.method), id: \.self) { choice in
                         Button(choice) { request.wrappedValue.method = choice }
@@ -56,7 +57,8 @@ struct RequestEditorView: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("HTTP method")
+                .disabled(method == "WS")
+                .help(method == "WS" ? "This address opens a WebSocket" : "HTTP method")
 
                 Rectangle().fill(Theme.stroke).frame(width: 1)
 

@@ -353,6 +353,40 @@ public struct RunState: Equatable, Sendable {
         }
     }
 
+    /// Applies what one run changed onto the current values, leaving alone anything the run did
+    /// not touch. Two requests in progress at once then cannot undo each other's changes.
+    public static func merge(_ current: [Variable], from before: [Variable], to after: [Variable]) -> [Variable] {
+        guard before != after else { return current }
+        var result = current
+        for variable in after where before.first(where: { $0.key == variable.key }) != variable {
+            if let index = result.firstIndex(where: { $0.key == variable.key }) {
+                result[index] = variable
+            } else {
+                result.append(variable)
+            }
+        }
+        let kept = Set(after.map(\.key))
+        for variable in before where !kept.contains(variable.key) {
+            result.removeAll { $0.key == variable.key }
+        }
+        return result
+    }
+
+    /// The same for cookies: adds and replaces what the run set, and removes what it deleted.
+    public static func merge(_ current: CookieJar, from before: CookieJar, to after: CookieJar) -> CookieJar {
+        guard before != after else { return current }
+        var result = current
+        for cookie in after.cookies where before.cookies.first(where: { $0.id == cookie.id }) != cookie {
+            result.cookies.removeAll { $0.id == cookie.id }
+            result.cookies.append(cookie)
+        }
+        let kept = Set(after.cookies.map(\.id))
+        for cookie in before.cookies where !kept.contains(cookie.id) {
+            result.cookies.removeAll { $0.id == cookie.id }
+        }
+        return result
+    }
+
     /// Applies the differences between what a script was given and what it left behind.
     mutating func apply(before: [String: String], after: [String: String], scope: VariableScopeKind) {
         for (key, value) in after where before[key] != value {

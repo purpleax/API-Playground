@@ -4,7 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 to 3 are built. See "Not yet checked" for what has not been tried on screen.
+Phases 1 to 4 are built. See "Not yet checked" for what has not been tried on screen.
 
 Covered by engine tests:
 
@@ -24,6 +24,11 @@ Covered by engine tests:
 - Masking of secrets in bodies, headers, URLs and the wire log
 - Pinned responses, and demo sequences saved with the collection
 - A mock server that answers from pinned responses, including a whole collection run against its own mock
+- Responses read as they arrive, with stopping part-way, and server-sent event parsing
+- Cookies: parsing, matching by domain, path, scheme and expiry, and carrying between requests
+- GraphQL schema introspection
+- OAuth 2: client credentials, password and authorization code requests, PKCE, token parsing, and a request fetching, reusing and refreshing its token
+- WebSockets: connect, send, receive and close, against a local server
 
 Checked by hand in the running app:
 
@@ -37,6 +42,11 @@ Checked by hand in the running app:
 - The mock server answering a collection with no backend running, and its temporary
   environment being removed on quit and after a force-quit
 - A demo sequence with notes, and presentation mode with Space, arrow keys and Esc
+- A live event stream with events appearing as they arrive, and stopping one part-way
+- Cookies set by one request shown in a Cookies tab and sent on the next
+- The GraphQL schema browser
+- A WebSocket conversation: connect, receive, send and disconnect
+- OAuth 2 client credentials through the real Keychain: Get Token, status, and the token sent
 
 Not yet checked:
 
@@ -45,6 +55,9 @@ Not yet checked:
 - Form, multipart, GraphQL and file body editors
 - Secret variables with the real Keychain (tests use an in-memory store)
 - Editing scripts and "Save from response" rows on screen, and running a single folder
+- OAuth 2's browser sign-in (authorization code): its requests are tested, but the sign-in
+  window has not been tried against a real provider
+- The cookie manager sheet, and a WebSocket over TLS (`wss://`)
 - In phase 3: the P key while presenting (its button was checked), removing a pinned
   response, reordering demo steps, and the mock's list of requests received
 
@@ -59,6 +72,23 @@ Not yet checked:
   temporary environment, which is removed when the mock stops.
 - **Demo sequences** list requests in order with a note each. **Present** shows one step at a
   time in large type: Space sends, the arrow keys move, P shows the pinned response, Esc exits.
+
+### Protocols
+
+- **Event streams.** A `text/event-stream` response shows its events as they arrive. Stop
+  ends it and keeps what was received. The 30-second timeout does not apply to event streams.
+- **Cookies.** Cookies a server sets are kept on this Mac, per workspace, and sent back on
+  later requests to the same site, unless the request has a Cookie header of its own.
+  Request > Cookies lists and removes them. Cookies set on a redirect that is followed are not kept.
+- **GraphQL.** With a GraphQL body, Schema asks the server to describe itself and opens a
+  browser of its types and fields. There is no query autocomplete yet.
+- **OAuth 2.** Choose it in a request's Auth tab. Client credentials and password tokens are
+  fetched automatically when a request is sent; authorization code opens a sign-in window
+  and returns to `apiplayground://oauth/callback`. Tokens are kept in the Keychain and
+  refreshed when they expire.
+- **WebSockets.** A request whose address starts with `ws://` or `wss://` gets a
+  conversation pane in place of the response, with Connect in place of Send. The message
+  being composed is saved with the request. WebSocket traffic has no timing or wire log.
 
 ### Look and feel
 

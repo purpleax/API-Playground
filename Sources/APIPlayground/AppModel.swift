@@ -434,18 +434,29 @@ final class AppModel {
         try? JSONEncoder().encode(jar).write(to: cookieFile, options: .atomic)
     }
 
-    /// Saves the variables that scripts or extractions changed during a run.
-    private func keep(_ state: RunState, collectionID: UUID) {
-        if state.cookies != cookieJar { setCookies(state.cookies) }
-        if state.globals != globals { saveGlobals(state.globals) }
-        if let index = collections.firstIndex(where: { $0.id == collectionID }),
-           collections[index].variables != state.collectionVariables {
-            collections[index].variables = state.collectionVariables
-            save(collections[index])
+    /// Saves what a run changed: variables set by scripts or extractions, and cookies.
+    /// Only the run's own changes are applied, so requests in progress at the same time
+    /// do not overwrite each other.
+    private func keep(_ state: RunState, since initial: RunState, collectionID: UUID) {
+        let cookies = RunState.merge(cookieJar, from: initial.cookies, to: state.cookies)
+        if cookies != cookieJar { setCookies(cookies) }
+
+        let newGlobals = RunState.merge(globals, from: initial.globals, to: state.globals)
+        if newGlobals != globals { saveGlobals(newGlobals) }
+
+        if let index = collections.firstIndex(where: { $0.id == collectionID }) {
+            let variables = RunState.merge(collections[index].variables, from: initial.collectionVariables, to: state.collectionVariables)
+            if variables != collections[index].variables {
+                collections[index].variables = variables
+                save(collections[index])
+            }
         }
-        if var environment = activeEnvironment, environment.variables != state.environment {
-            environment.variables = state.environment
-            saveEnvironment(environment)
+        if var environment = activeEnvironment {
+            let variables = RunState.merge(environment.variables, from: initial.environment, to: state.environment)
+            if variables != environment.variables {
+                environment.variables = variables
+                saveEnvironment(environment)
+            }
         }
     }
 
@@ -488,7 +499,7 @@ final class AppModel {
         Task {
             var state = initial
             let result = await executor.run(request, in: collection, state: &state, handlers: handlers, cancellation: flag)
-            keep(state, collectionID: collection.id)
+            keep(state, since: initial, collectionID: collection.id)
             cancelFlags[id] = nil
             live[id] = nil
             record(result)
@@ -697,7 +708,7 @@ final class AppModel {
                 runner?.rows[position].result = result
                 record(result)
             }
-            keep(state, collectionID: collectionID)
+            keep(state, since: initial, collectionID: collectionID)
             if runner?.id == sessionID { runner?.isRunning = false }
         }
     }
@@ -727,9 +738,14 @@ final class AppModel {
         let resolver = resolver(forCollection: index)
         // The request's own key-like headers and parameters, which a server may echo back.
         let request = collections[index].request(id: requestID)
-        let own = ((request?.headers ?? []) + (request?.params ?? []))
+        var own = ((request?.headers ?? []) + (request?.params ?? []))
             .filter { Redactor.isSensitiveName($0.key) }
             .map { resolver.resolve($0.value).string }
+        // An OAuth 2 token is as secret as any other, wherever a server echoes it.
+        if case .oauth2(let config) = collections[index].effectiveAuth(forRequest: requestID), let token = executor.tokens?.token(for: config.id) {
+            own.append(token.accessToken)
+            if let refresh = token.refreshToken { own.append(refresh) }
+        }
         return Redactor(
             variables: globals + collections[index].variables + (activeEnvironment?.variables ?? []),
             auths: [collections[index].effectiveAuth(forRequest: requestID)],

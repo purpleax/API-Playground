@@ -139,6 +139,32 @@ final class Collector<Value: Sendable>: @unchecked Sendable {
         #expect(jar.cookies.map { "\($0.name)=\($0.value)" } == ["a=2"])
     }
 
+    @Test func overlappingRunsDoNotUndoEachOther() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        // Two requests start from the same empty jar. One sets a cookie and finishes first.
+        let start = CookieJar()
+        var first = start
+        first.store(setCookieHeaders: ["session=abc; Path=/"], from: url, now: now)
+        var current = RunState.merge(start, from: start, to: first)
+        #expect(current.cookies.map(\.name) == ["session"])
+        // The slower one changed nothing, so finishing it must not wipe the cookie.
+        current = RunState.merge(current, from: start, to: start)
+        #expect(current.cookies.map(\.name) == ["session"])
+        // A run that deletes a cookie removes only that one.
+        var deleting = current
+        deleting.store(setCookieHeaders: ["session=; Path=/; Max-Age=0", "other=1; Path=/"], from: url, now: now)
+        #expect(RunState.merge(current, from: current, to: deleting).cookies.map(\.name) == ["other"])
+
+        // The same rule for variables.
+        let before = [Variable(key: "a", value: "1"), Variable(key: "gone", value: "x")]
+        let after = [Variable(key: "a", value: "1", currentValue: "2"), Variable(key: "new", value: "", currentValue: "n")]
+        let meanwhile = before + [Variable(key: "other", value: "kept")]
+        #expect(RunState.merge(meanwhile, from: before, to: after) == [
+            Variable(key: "a", value: "1", currentValue: "2"), Variable(key: "other", value: "kept"), Variable(key: "new", value: "", currentValue: "n"),
+        ])
+        #expect(RunState.merge(meanwhile, from: before, to: before) == meanwhile)
+    }
+
     @Test func cookiesCarryBetweenRequestsInARun() async throws {
         try await withEchoServer { base in
             let login = RequestItem(name: "Login", url: "\(base)/login")
