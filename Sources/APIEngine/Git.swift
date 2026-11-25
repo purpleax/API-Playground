@@ -437,6 +437,9 @@ public struct GitRepository: Sendable {
 
     /// Fetches the remote's commits for this branch and merges them in.
     public func pull() throws -> MergeOutcome {
+        guard try status().changes.isEmpty else {
+            throw GitError("Commit or discard your changes before pulling.")
+        }
         try fetch()
         guard let upstream = try status().upstream else {
             throw GitError("This branch has not been pushed yet, so there is nothing to pull.")

@@ -119,6 +119,7 @@ extension AppModel {
     }
 
     /// Runs Git work away from the main thread, one piece at a time.
+    /// Looks at the repository again before returning.
     /// - Returns: The work's result, or nil when it failed or Git was already busy.
     private func gitRun<T: Sendable>(_ label: String, _ work: @escaping @Sendable (GitRepository) throws -> T) async -> T? {
         guard let repo = git?.repo, gitBusy == nil else { return nil }
@@ -126,12 +127,15 @@ extension AppModel {
         gitBusy = label
         gitBanner = nil
         defer { gitBusy = nil }
+        var result: T?
         do {
-            return try await Task.detached { try work(repo) }.value
+            result = try await Task.detached { try work(repo) }.value
         } catch {
             report(error.localizedDescription, isError: true)
-            return nil
         }
+        // Still busy while looking again, so the screen never shows the state from before.
+        await loadGit()
+        return result
     }
 
     // MARK: Starting
@@ -177,21 +181,18 @@ extension AppModel {
             return false
         }
         let done: Void? = await gitRun("Committing…") { try $0.commitAll(message: message) }
-        await loadGit()
         if done != nil { report("Committed.") }
         return done != nil
     }
 
     func push() async {
         let done: Void? = await gitRun("Pushing…") { try $0.push() }
-        await loadGit()
         if done != nil { report("Pushed to the remote.") }
     }
 
     /// Asks the remote what it has, without changing anything here.
     func fetch() async {
         let done: Void? = await gitRun("Checking the remote…") { try $0.fetch() }
-        await loadGit()
         if done != nil, let status = git?.status {
             report(status.behind == 0 ? "Nothing new on the remote." : "The remote has \(status.behind) new \(status.behind == 1 ? "commit" : "commits"). Pull to get them.")
         }
@@ -199,7 +200,6 @@ extension AppModel {
 
     func pull() async {
         guard let outcome = await gitRun("Pulling…", { try $0.pull() }) else {
-            await loadGit()
             return
         }
         await finish(outcome, upToDate: "Already up to date.", done: "Pulled the latest changes.")
@@ -207,7 +207,6 @@ extension AppModel {
 
     func merge(branch: String) async {
         guard let outcome = await gitRun("Merging…", { try $0.merge(branch) }) else {
-            await loadGit()
             return
         }
         await finish(outcome, upToDate: "“\(branch)” has nothing new.", done: "Merged “\(branch)”.")
@@ -216,11 +215,9 @@ extension AppModel {
     private func finish(_ outcome: MergeOutcome, upToDate: String, done: String) async {
         switch outcome {
         case .upToDate:
-            await loadGit()
             report(upToDate)
         case .fastForwarded, .merged:
             reload()
-            await loadGit()
             report(done)
         case .conflicts:
             await continueMerge()
@@ -230,16 +227,13 @@ extension AppModel {
     /// Settles what can be settled without help, then either finishes the merge or asks.
     func continueMerge() async {
         guard let remaining = await gitRun("Merging…", { try $0.mergeConflicts() }) else {
-            await loadGit()
             return
         }
         if remaining.isEmpty {
             let done: Void? = await gitRun("Merging…") { try $0.finishMerge() }
             reload()
-            await loadGit()
             if done != nil { report("Merged. Both sides' changes fitted together.") }
         } else {
-            await loadGit()
             mergeSession = MergeSession(conflicts: remaining)
             showingGit = true
         }
@@ -257,7 +251,6 @@ extension AppModel {
             mergeSession = nil
             reload()
         }
-        await loadGit()
         if done != nil { report("Merged.") }
     }
 
@@ -267,39 +260,33 @@ extension AppModel {
             mergeSession = nil
             reload()
         }
-        await loadGit()
         if done != nil { report("The merge was abandoned. Nothing changed.") }
     }
 
     func discard(_ change: GitChange) async {
         let done: Void? = await gitRun("Discarding…") { try $0.discard(change) }
         if done != nil { reload() }
-        await loadGit()
     }
 
     func switchBranch(_ name: String) async {
         let done: Void? = await gitRun("Switching…") { try $0.switchBranch(name) }
         if done != nil { reload() }
-        await loadGit()
         if done != nil { report("Now on “\(name)”.") }
     }
 
     func createBranch(_ name: String) async -> Bool {
         let done: Void? = await gitRun("Creating the branch…") { try $0.createBranch(name) }
-        await loadGit()
         if done != nil { report("Created “\(name)” and switched to it.") }
         return done != nil
     }
 
     func setRemote(_ url: String) async {
         let done: Void? = await gitRun("Saving…") { try $0.setRemoteURL(url) }
-        await loadGit()
         if done != nil { report("Saved the remote address.") }
     }
 
     func setIdentity(_ identity: GitIdentity) async {
         let done: Void? = await gitRun("Saving…") { try $0.setIdentity(identity) }
-        await loadGit()
         if done != nil { report("Saved your name and email for this workspace.") }
     }
 

@@ -4,8 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 to 5 are built. Phase 5 (Git Sync) passes its engine tests, but its screens have
-not been tried in the running app yet. See "Not yet checked".
+Phases 1 to 5 are built.
 
 Covered by engine tests:
 
@@ -54,13 +53,14 @@ Checked by hand in the running app:
 - The GraphQL schema browser
 - A WebSocket conversation: connect, receive, send and disconnect
 - OAuth 2 client credentials through the real Keychain: Get Token, status, and the token sent
+- Git Sync against a remote on this Mac: the branch chip, changes with a diff, commit, a
+  refused push and pull, a pull that needed choices in the merge view, push, history,
+  creating and switching branches, merging a branch, abandoning a merge, and cloning
 
 Not yet checked:
 
-- All of Git Sync's screens: the branch chip, the Git Sync sheet (changes with a diff,
-  commit, history, branches, remote and identity), the merge view, and Clone a Repository.
-  They build and the app starts with them, but the screen was locked when they were due
-  to be tried
+- Git Sync's "Start Tracking This Vault with Git", Discard, saving the remote address and
+  identity, and the folder chooser in Clone a Repository
 - Push and pull against a real host such as GitHub (tests use a remote on this Mac)
 - The zip import against a real Postman "Export Data" file (tested with a hand-made zip)
 - cURL import from the clipboard, the file-picker import, and switching to a Local Vault

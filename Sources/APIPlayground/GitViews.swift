@@ -349,7 +349,7 @@ private struct ChangesTab: View {
                 TextField("Say what changed, for example “Add the orders requests”", text: $message)
                     .textFieldStyle(ThemedTextFieldStyle())
                     .onSubmit(commit)
-                Button(state.rows.count == 1 ? "Commit 1 Change" : "Commit \(state.rows.count) Changes", action: commit)
+                Button(state.rows.isEmpty ? "Commit" : state.rows.count == 1 ? "Commit 1 Change" : "Commit \(state.rows.count) Changes", action: commit)
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(state.rows.isEmpty || message.trimmingCharacters(in: .whitespaces).isEmpty || state.status.isMerging)
             }
@@ -718,12 +718,24 @@ private struct ChoiceCard: View {
 struct CloneView: View {
     @Environment(AppModel.self) private var model
     @State private var remote = ""
-    @State private var parent = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    @State private var parent = CloneView.startingParent()
     @State private var name = ""
     @State private var nameEdited = false
 
     private var folderName: String {
         nameEdited ? name.trimmingCharacters(in: .whitespaces) : Self.suggestedName(for: remote)
+    }
+
+    private static let parentKey = "cloneParentPath"
+
+    /// The folder the last clone went into if it is still there, otherwise Documents.
+    static func startingParent() -> URL {
+        var isDirectory: ObjCBool = false
+        if let path = UserDefaults.standard.string(forKey: parentKey),
+           FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
     /// The last part of a repository address, without ".git": the name Git itself would use.
@@ -812,6 +824,9 @@ struct CloneView: View {
         panel.directoryURL = parent
         panel.prompt = "Choose"
         panel.message = "Choose the folder to put the cloned workspace in."
-        if panel.runModal() == .OK, let url = panel.url { parent = url }
+        if panel.runModal() == .OK, let url = panel.url {
+            parent = url
+            UserDefaults.standard.set(url.path, forKey: Self.parentKey)
+        }
     }
 }
