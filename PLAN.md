@@ -42,7 +42,7 @@ The app has its own name and visual design. It matches Insomnia's feature set, n
 | Variables | Postman's `{{name}}` syntax and built-in dynamic variables, used natively | Imported requests run unchanged |
 | Scripting | JavaScriptCore, with a Postman-compatible `pm` object | No bundled runtime, and imported scripts mostly run as they are |
 | Linting | `vacuum` bundled as a helper binary | Reads Spectral rulesets without needing Node |
-| Git | libgit2 | No dependency on a system Git install |
+| Git | The `git` command on the Mac for now, kept behind one file; libgit2 before shipping | The command needs no download and uses the sign-in Git already has. libgit2 removes the dependency on a system Git install |
 | Mock servers | In-process HTTP server on localhost | No separate process to manage |
 | Distribution | Notarised direct download, updates through Sparkle | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
 

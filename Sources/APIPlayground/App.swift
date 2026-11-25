@@ -19,6 +19,10 @@ struct APIPlaygroundApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.flushSaves()
                 }
+                // Files may have been changed by Git in Terminal while the app was in the background.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.refreshGit()
+                }
         }
         .defaultSize(width: 1360, height: 840)
         .windowStyle(.hiddenTitleBar)
@@ -75,6 +79,19 @@ struct APIPlaygroundApp: App {
                         Text(appearance.title).tag(appearance)
                     }
                 }
+            }
+            CommandMenu("Git") {
+                Button("Git Sync…") { model.showingGit = true }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .disabled(model.git == nil)
+                Button("Pull") { Task { await model.pull() } }
+                    .disabled(model.git?.remoteURL == nil || model.gitBusy != nil)
+                Button("Push") { Task { await model.push() } }
+                    .disabled(model.git?.remoteURL == nil || model.gitBusy != nil)
+                Divider()
+                Button("Clone a Repository…") { model.showingClone = true }
+                Button("Start Tracking This Vault with Git") { Task { await model.startTracking() } }
+                    .disabled(!model.canStartTracking)
             }
             CommandMenu("Demo") {
                 Button(model.presentation == nil ? "Present Request" : "Stop Presenting") {
@@ -237,6 +254,16 @@ struct ContentView: View {
                 .environment(model)
                 .themedSheet()
         }
+        .sheet(isPresented: $model.showingGit) {
+            GitView()
+                .environment(model)
+                .themedSheet()
+        }
+        .sheet(isPresented: $model.showingClone) {
+            CloneView()
+                .environment(model)
+                .themedSheet()
+        }
         .sheet(isPresented: $model.showingCookies) {
             CookieManagerView()
                 .environment(model)
@@ -298,7 +325,10 @@ struct TopBar: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(Theme.raised, in: Capsule())
-                .help(model.vaultURL == nil ? "Working in the Scratch Pad" : "Working in a Local Vault folder")
+                .help(model.vaultURL == nil ? "Working in the Scratch Pad" : model.git == nil ? "Working in a Local Vault folder" : "Working in a folder synced with Git")
+            if let state = model.git {
+                GitChip(state: state)
+            }
 
             Spacer(minLength: 12)
 

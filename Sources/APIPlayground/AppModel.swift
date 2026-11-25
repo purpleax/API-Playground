@@ -152,6 +152,17 @@ final class AppModel {
     var showingEnvironments = false
     var runner: RunnerSession?
 
+    /// The workspace's Git repository, or nil when its folder is not one.
+    var git: GitState?
+    /// What Git is doing right now, such as "Pulling…". Nil when idle.
+    var gitBusy: String?
+    var gitBanner: GitBanner?
+    var showingGit = false
+    var showingClone = false
+    /// The conflicts of a merge that is waiting for choices.
+    var mergeSession: MergeSession?
+    @ObservationIgnored var gitRefreshTask: Task<Void, Never>?
+
     var appearance = AppAppearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .dark {
         didSet {
             UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
@@ -231,6 +242,8 @@ final class AppModel {
         store = WorkspaceStore(root: url ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
         selection = nil
         responses = [:]
+        git = nil
+        mergeSession = nil
         reload()
     }
 
@@ -245,6 +258,8 @@ final class AppModel {
             activeEnvironmentID = environments.contains { $0.id == saved } ? saved : nil
             removeLeftoverMockEnvironment()
             loadCookies()
+            if let selection, request(selection) == nil { self.selection = nil }
+            refreshGit()
         } catch {
             show("Could not open the workspace", error)
         }
@@ -336,6 +351,7 @@ final class AppModel {
         collections.removeAll { $0.id == id }
         if let selection, request(selection) == nil { self.selection = nil }
         do { try store.deleteCollection(id: id) } catch { show("Could not delete the collection", error) }
+        refreshGit()
     }
 
     func renameCollection(_ id: UUID, to name: String) {
@@ -358,6 +374,14 @@ final class AppModel {
         saveTasks[collection.id] = nil
         if mock?.collectionID == collection.id { refreshMock() }
         do { try store.save(collection) } catch { show("Could not save \(collection.name)", error) }
+        refreshGit()
+    }
+
+    /// Writes any edits still waiting to be saved, so the files on disk are current.
+    func flushPendingSaves() {
+        for id in Array(saveTasks.keys) {
+            if let collection = collections.first(where: { $0.id == id }) { save(collection) }
+        }
     }
 
     /// Saves shortly after the last edit, so typing does not write a file per keystroke.
@@ -389,17 +413,20 @@ final class AppModel {
             environments.append(environment)
         }
         do { try store.save(environment) } catch { show("Could not save \(environment.name)", error) }
+        refreshGit()
     }
 
     func deleteEnvironment(_ id: UUID) {
         environments.removeAll { $0.id == id }
         if activeEnvironmentID == id { activeEnvironmentID = nil }
         do { try store.deleteEnvironment(id: id) } catch { show("Could not delete the environment", error) }
+        refreshGit()
     }
 
     func saveGlobals(_ variables: [Variable]) {
         globals = variables
         do { try store.saveGlobals(variables) } catch { show("Could not save globals", error) }
+        refreshGit()
     }
 
     // MARK: Sending

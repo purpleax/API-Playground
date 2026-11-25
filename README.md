@@ -4,7 +4,8 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 to 4 are built. See "Not yet checked" for what has not been tried on screen.
+Phases 1 to 5 are built. Phase 5 (Git Sync) passes its engine tests, but its screens have
+not been tried in the running app yet. See "Not yet checked".
 
 Covered by engine tests:
 
@@ -29,6 +30,12 @@ Covered by engine tests:
 - GraphQL schema introspection
 - OAuth 2: client credentials, password and authorization code requests, PKCE, token parsing, and a request fetching, reusing and refreshing its token
 - WebSockets: connect, send, receive and close, against a local server
+- Git: status, commit, history, discard, branches, clone, push and pull, against a local
+  remote with two people working from it
+- Merging: changes to different fields of one request combine, headers and other lists are
+  matched by name, the same field changed two ways waits for a choice, a request deleted
+  on one side and edited on the other asks which to keep, and two new requests with one
+  name are both kept
 
 Checked by hand in the running app:
 
@@ -50,6 +57,11 @@ Checked by hand in the running app:
 
 Not yet checked:
 
+- All of Git Sync's screens: the branch chip, the Git Sync sheet (changes with a diff,
+  commit, history, branches, remote and identity), the merge view, and Clone a Repository.
+  They build and the app starts with them, but the screen was locked when they were due
+  to be tried
+- Push and pull against a real host such as GitHub (tests use a remote on this Mac)
 - The zip import against a real Postman "Export Data" file (tested with a hand-made zip)
 - cURL import from the clipboard, the file-picker import, and switching to a Local Vault
 - Form, multipart, GraphQL and file body editors
@@ -89,6 +101,32 @@ Not yet checked:
 - **WebSockets.** A request whose address starts with `ws://` or `wss://` gets a
   conversation pane in place of the response, with Connect in place of Send. The message
   being composed is saved with the request. WebSocket traffic has no timing or wire log.
+
+### Git Sync
+
+A Local Vault folder that is a Git repository gets a branch chip in the top bar and a Git
+menu. Git > Clone a Repository copies a shared workspace onto this Mac; Git > Start Tracking
+turns the open vault into a repository.
+
+- **Changes** lists what is uncommitted by its name in the app ("Request: List pets"), with
+  a diff against the last commit, Discard, and a commit box.
+- **Pull** merges by value, not by line of text. Two people changing different fields of
+  one request, or adding different headers, never collide. Only a value both changed in
+  different ways is a conflict, and the merge view then shows mine and theirs side by side
+  for each one, with the value before. Abandon Merge puts everything back.
+- **Branches** can be created, switched and merged into the current one. Branches that
+  exist only on the remote are listed too.
+- Secret values, current values, cookies, history and OAuth tokens are never committed:
+  they live in the Keychain or the app's private data, outside the workspace.
+
+Git Sync runs the `git` command already on this Mac (Apple's Command Line Tools or
+Homebrew), so it signs in to a remote the same way Git does in Terminal. It never asks for a
+password itself: if the remote refuses, it says so. All of it is in `Sources/APIEngine/Git.swift`,
+so a built-in library can replace the command before the app ships.
+
+Limits: no stash, rebase, tags or amend; a merge needs a clean workspace first; a vault
+inside a larger repository is not synced; and committing is refused while the mock server
+runs, because it keeps a temporary environment in the workspace.
 
 ### Look and feel
 
