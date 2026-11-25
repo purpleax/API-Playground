@@ -26,6 +26,7 @@ public struct WorkspaceStore: Sendable {
 
     private var collectionsDir: URL { root.appendingPathComponent("collections", isDirectory: true) }
     private var environmentsDir: URL { root.appendingPathComponent("environments", isDirectory: true) }
+    private var specsDir: URL { root.appendingPathComponent("specs", isDirectory: true) }
     private var fm: FileManager { .default }
 
     // MARK: Files on disk
@@ -44,6 +45,7 @@ public struct WorkspaceStore: Sendable {
         var preRequestScript: String?
         var testScript: String?
         var postmanID: String?
+        var specFile: String?
         var order: [String]?
         var sequences: [DemoSequence]?
     }
@@ -120,6 +122,51 @@ public struct WorkspaceStore: Sendable {
         }
     }
 
+    // MARK: Specs
+
+    /// The extensions a spec file can have. Spec files are kept exactly as written.
+    public static let specExtensions = ["yaml", "yml", "json"]
+    /// The lint ruleset that applies to every spec in the workspace.
+    public static let rulesetFile = ".spectral.yaml"
+
+    public func loadSpecs() throws -> [SpecFile] {
+        guard fm.fileExists(atPath: specsDir.path) else { return [] }
+        return try fm.contentsOfDirectory(at: specsDir, includingPropertiesForKeys: nil)
+            .filter { Self.specExtensions.contains($0.pathExtension.lowercased()) && !$0.lastPathComponent.hasPrefix(".") }
+            .map { SpecFile(file: $0.lastPathComponent, text: try String(contentsOf: $0, encoding: .utf8)) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    public func save(_ spec: SpecFile) throws {
+        try fm.createDirectory(at: specsDir, withIntermediateDirectories: true)
+        try Data(spec.text.utf8).write(to: specsDir.appendingPathComponent(spec.file), options: .atomic)
+    }
+
+    public func deleteSpec(file: String) throws {
+        let url = specsDir.appendingPathComponent(file)
+        if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
+    }
+
+    /// A file name for a new spec that no existing spec has.
+    public func newSpecFileName(for name: String, extension ext: String = "yaml") -> String {
+        uniqueURL(in: specsDir, base: Self.slug(name), suffix: "." + ext).lastPathComponent
+    }
+
+    public func loadRuleset() -> String {
+        (try? String(contentsOf: specsDir.appendingPathComponent(Self.rulesetFile), encoding: .utf8)) ?? ""
+    }
+
+    /// Saves the workspace's lint ruleset. An empty ruleset removes the file.
+    public func saveRuleset(_ text: String) throws {
+        let url = specsDir.appendingPathComponent(Self.rulesetFile)
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
+            return
+        }
+        try fm.createDirectory(at: specsDir, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url, options: .atomic)
+    }
+
     // MARK: Collections
 
     public func loadCollections() throws -> [APICollection] {
@@ -140,6 +187,7 @@ public struct WorkspaceStore: Sendable {
                 items: try loadItems(in: dir, order: meta.order ?? [])
             )
             collection.sequences = meta.sequences ?? []
+            collection.specFile = meta.specFile
             result.append(collection)
         }
         return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -163,6 +211,7 @@ public struct WorkspaceStore: Sendable {
                 preRequestScript: collection.preRequestScript,
                 testScript: collection.testScript,
                 postmanID: collection.postmanID,
+                specFile: collection.specFile,
                 order: order,
                 sequences: collection.sequences.isEmpty ? nil : collection.sequences
             ), to: temp.appendingPathComponent("collection.json"))
@@ -366,5 +415,21 @@ public struct WorkspaceStore: Sendable {
         while out.hasSuffix("-") { out.removeLast() }
         if out.isEmpty { return "untitled" }
         return String(out.prefix(80))
+    }
+}
+
+/// An API spec kept in the workspace's `specs` folder.
+public struct SpecFile: Identifiable, Hashable, Sendable {
+    /// The file's name in the `specs` folder, such as `petstore.yaml`.
+    public var file: String
+    public var text: String
+
+    public var id: String { file }
+    /// The file name without its extension.
+    public var name: String { (file as NSString).deletingPathExtension }
+
+    public init(file: String, text: String) {
+        self.file = file
+        self.text = text
     }
 }

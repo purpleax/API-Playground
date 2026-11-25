@@ -170,6 +170,8 @@ public struct WorkspaceFileInfo: Equatable, Sendable {
         case environment = "Environment"
         case globals = "Global variables"
         case settings = "Workspace settings"
+        case spec = "Spec"
+        case ruleset = "Lint ruleset"
         case other = "File"
     }
 
@@ -194,11 +196,15 @@ public struct WorkspaceFileInfo: Equatable, Sendable {
             kind = .globals
         } else if path == "workspace.json" {
             kind = .settings
+        } else if path == "specs/" + WorkspaceStore.rulesetFile {
+            kind = .ruleset
+        } else if path.hasPrefix("specs/"), WorkspaceStore.specExtensions.contains((file as NSString).pathExtension.lowercased()) {
+            kind = .spec
         } else {
             kind = .other
         }
-        name = nil
-        guard kind != .other, kind != .globals, kind != .settings else { return }
+        name = kind == .spec ? (file as NSString).deletingPathExtension : nil
+        guard kind != .other, kind != .globals, kind != .settings, kind != .spec, kind != .ruleset else { return }
         for data in versions {
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let found = object["name"] as? String, !found.isEmpty {
@@ -210,7 +216,7 @@ public struct WorkspaceFileInfo: Equatable, Sendable {
 
     public var title: String {
         switch kind {
-        case .globals, .settings: return kind.rawValue
+        case .globals, .settings, .ruleset: return kind.rawValue
         case .other: return path
         default: return name ?? (path as NSString).lastPathComponent
         }

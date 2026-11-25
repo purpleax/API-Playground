@@ -363,6 +363,8 @@ public struct APICollection: Hashable, Identifiable, Sendable {
     public var testScript: String
     /// The Postman collection this was imported from, so a later import updates it in place.
     public var postmanID: String?
+    /// The spec file this was generated from, so generating again updates it in place.
+    public var specFile: String?
     public var items: [Node]
     public var sequences: [DemoSequence] = []
 
