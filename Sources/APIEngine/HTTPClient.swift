@@ -314,6 +314,26 @@ public struct HTTPClient: Sendable {
     private static func perform(
         _ request: PreparedRequest, options: HTTPOptions, handlers: HTTPStreamHandlers, flag: CancellationFlag
     ) throws -> HTTPResponse {
+        do {
+            return try performOnce(request, options: options, handlers: handlers, flag: flag, capAtTLS12: false)
+        } catch let error as HTTPClientError where error.code == Int(CURLE_SSL_CONNECT_ERROR.rawValue) && options.clientCertificate != nil {
+            // The Mac's TLS library cannot complete a TLS 1.3 handshake with a client
+            // certificate against some servers (OpenSSL 3 and later answer "decode error").
+            // The same handshake works over TLS 1.2, so try that once before giving up.
+            guard !flag.isCancelled,
+                  var response = try? performOnce(request, options: options, handlers: handlers, flag: flag, capAtTLS12: true)
+            else { throw error }
+            response.wireLog.insert(WireLogEntry(
+                kind: .info,
+                text: "The first handshake failed while presenting the client certificate (\(error.message)). Sent again over TLS 1.2."
+            ), at: 0)
+            return response
+        }
+    }
+
+    private static func performOnce(
+        _ request: PreparedRequest, options: HTTPOptions, handlers: HTTPStreamHandlers, flag: CancellationFlag, capAtTLS12: Bool
+    ) throws -> HTTPResponse {
         guard let handle = curl_easy_init() else {
             throw HTTPClientError(code: -1, message: "Could not start libcurl.")
         }
@@ -365,6 +385,10 @@ public struct HTTPClient: Sendable {
             if certificate.isPKCS12 { _ = apc_setopt_str(handle, CURLOPT_SSLCERTTYPE, "P12") }
             if let key = certificate.keyPath, !key.isEmpty { _ = apc_setopt_str(handle, CURLOPT_SSLKEY, expand(key)) }
             if let passphrase = certificate.passphrase, !passphrase.isEmpty { _ = apc_setopt_str(handle, CURLOPT_KEYPASSWD, passphrase) }
+        }
+        if capAtTLS12 {
+            // CURL_SSLVERSION_MAX_TLSv1_2
+            _ = apc_setopt_long(handle, CURLOPT_SSLVERSION, 6 << 16)
         }
         if request.method == "HEAD" {
             _ = apc_setopt_long(handle, CURLOPT_NOBODY, 1)
@@ -467,6 +491,9 @@ public struct HTTPClient: Sendable {
             // libcurl's own words for these are vague about which side the trouble is on.
             if options.clientCertificate != nil, code == CURLE_SSL_CERTPROBLEM {
                 message = "The client certificate could not be used. Check the certificate and key files and the passphrase."
+            }
+            if code == CURLE_PEER_FAILED_VERIFICATION {
+                message = "The server's certificate could not be verified. It may be self-signed, expired, or for a different host."
             }
             throw HTTPClientError(code: Int(code.rawValue), message: message)
         }

@@ -4,7 +4,7 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 
 ## Status
 
-Phases 1 to 6 are built.
+Phases 1 to 6 are built, and so is every feature listed in [PLAN.md](PLAN.md).
 
 Covered by engine tests:
 
@@ -41,6 +41,12 @@ Covered by engine tests:
   matched by name, the same field changed two ways waits for a choice, a request deleted
   on one side and edited on the other asks which to keep, and two new requests with one
   name are both kept
+- Response filtering with JSONPath and jq-style expressions
+- Decoding JSON Web Tokens, and reading rate-limit headers in their common forms
+- The server's certificate chain and a client certificate, against a TLS server on this Mac
+- Copying a request as cURL (read back by the cURL importer), JavaScript, Python and Swift
+- Repeat runs: sending a set number at once, stopping, percentiles and the error rate
+- Matching for the command palette
 
 Checked by hand in the running app:
 
@@ -71,9 +77,27 @@ Checked by hand in the running app:
 - gRPC against a test server on this Mac: loading its methods by reflection, the methods
   still being there after a restart, choosing a method, a unary call, a server stream of
   40 messages, and a call that failed with NOT_FOUND
+- Added in November 2026, against servers on this Mac: a JSONPath filter, a jq filter and
+  a broken one on a response body; the rate-limit gauge and a decoded token on the
+  Headers tab; the code sheet; a repeat run of 8 sends with one failure; the command
+  palette finding and opening a request and starting a mock; the TLS tab after a request
+  that presented a client certificate; and the menu-bar item showing the mock's port,
+  listing its commands and stopping the mock
 
 Not yet checked:
 
+- The Shortcuts actions in the Shortcuts app. The app bundle carries their description,
+  but no shortcut has been made or run with them
+- In the command palette: the arrow keys, Return and Esc (rows were chosen by clicking),
+  and ⌘K itself (it was opened from its button)
+- A repeat run with more than one send at once from the app (the engine test covers it),
+  and stopping one part-way
+- Client certificates: choosing files in the sheet, a passphrase kept in the Keychain,
+  and a `.p12` file from the app (the engine test covers `.p12`). A real server that
+  demands a certificate
+- Copy as cURL from the menu and the sidebar (the code sheet was checked), and the
+  JavaScript and Swift code being run. Python and the cURL command are only checked to parse
+- Hiding the menu-bar item, and the app staying open with its window closed while a mock runs
 - gRPC against a real server, over TLS (`grpcs://`), with metadata or auth set in the app,
   a client-streaming call from the app, loading a descriptor set file, the Stop button
   on a stream, and a stream's messages appearing one by one (the test stream finished
@@ -102,6 +126,50 @@ Not yet checked:
 - The cookie manager sheet, and a WebSocket over TLS (`wss://`)
 - In phase 3: the P key while presenting (its button was checked), removing a pinned
   response, reordering demo steps, and the mock's list of requests received
+
+### Inspecting responses
+
+- **Filter.** Above a JSON body is a filter field. An expression that starts with `$` is
+  JSONPath (`$.items[?(@.price > 10)].name`); anything else is read as jq
+  (`.items[] | select(.price > 10) | .name`). The filter is saved with the request. The jq
+  side covers paths, `[]`, slices, pipes, `select`, `map`, `length` and `keys`, not the
+  whole language.
+- **Rate limits and tokens.** When a response carries rate-limit headers, the Headers tab
+  shows the remaining quota as a gauge with the time it refills. JSON Web Tokens found in
+  the request's headers, the response's headers or its body are listed there and can be
+  opened to read their claims and expiry. Signatures are not checked.
+- **TLS.** An https response has a TLS tab with the protocol, the cipher and each
+  certificate in the server's chain: who issued it, the names it covers, when it expires,
+  and a button to copy it.
+- **Client certificates.** Request > TLS and Client Certificates lists which certificate to
+  present to which host, for servers that use mutual TLS. A certificate is a PEM file with
+  its key, or a `.p12` file. The list is kept on this Mac, not in the workspace, and
+  passphrases go in the Keychain. The same sheet can switch off the checking of server
+  certificates, for a local server with a self-signed one. Client certificates are used
+  for HTTP requests and OAuth 2 token requests, not yet for WebSockets or gRPC.
+  The Mac's own TLS library cannot finish a TLS 1.3 handshake with a client certificate
+  against servers running OpenSSL 3 or later, so when that handshake fails the request is
+  sent once more over TLS 1.2, and the Log tab says so.
+
+### Tools
+
+- **Copy as code.** The braces button beside a request's name, or Request > Copy as
+  Code, shows the request as cURL, JavaScript, Python or Swift with variables filled in.
+  Request > Copy as cURL (⇧⌘C) copies straight away. While Hide Secrets is on, secrets
+  are masked in the copy.
+- **Repeat.** The repeat button, or Request > Repeat Request (⇧⌘R), sends one request a
+  chosen number of times, several at once if wanted, and reports the median, 90%, 95% and
+  99% response times, a histogram, and the error rate. A send counts as an error when it
+  gets no response, a 4xx or 5xx status, or a failed test. Nothing from a repeat run is
+  added to the history or saved to variables.
+- **Command palette.** ⌘K opens a search over every request and command: go to a
+  request, send, run a collection, switch environment, start a mock, change theme.
+- **Menu bar.** An item in the menu bar starts and stops the mock server and copies its
+  address. While a mock is running, closing the window leaves the app running so the
+  mock stays up. View > Show Mock Servers in Menu Bar turns the item off.
+- **Shortcuts.** The Shortcuts app gets five actions: Send Request, Run Collection, Start
+  Mock Server, Stop Mock Server and Set Environment. They act on the workspace that is
+  open in the app.
 
 ### Demo features
 
@@ -383,6 +451,6 @@ not been run.
 | `Sources/APIPlayground` | The SwiftUI and AppKit app. |
 | `Tests/APIEngineTests` | Engine tests. HTTP tests use a local server and need no internet. |
 | `Tests/Support` | A small gRPC server, run with Node, that the gRPC tests call. Those tests are skipped where Node is not installed. |
-| `Scripts/make-app.sh` | Builds the app bundle. |
+| `Scripts/make-app.sh` | Builds the app bundle, including the description of its Shortcuts actions. |
 | `Scripts/release.sh` | Makes the signed, notarised disk image. Settings in `Scripts/release.conf`. |
 | `Scripts/make-icon.swift` | Draws the placeholder icon into `Resources/`. |

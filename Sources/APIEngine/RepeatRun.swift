@@ -91,6 +91,36 @@ public struct LatencyStats: Equatable, Sendable {
     }
 }
 
+/// Sends the same thing many times, a set number at once.
+public enum RepeatRunner {
+    /// - Parameters:
+    ///   - send: One send. Called `count` times, with at most `concurrency` in progress together.
+    ///   - each: Called with every result as it arrives, in the caller's own context.
+    ///     Return false to stop: sends in progress are cancelled and no more are started.
+    public static func run(
+        count: Int, concurrency: Int, isolation: isolated (any Actor)? = #isolation,
+        send: @escaping @Sendable () async -> RepeatSample, each: (RepeatSample) -> Bool
+    ) async {
+        let total = max(count, 0)
+        let width = max(concurrency, 1)
+        await withTaskGroup(of: RepeatSample.self) { group in
+            var launched = 0
+            while launched < min(width, total) {
+                launched += 1
+                group.addTask { await send() }
+            }
+            for await sample in group {
+                guard each(sample), !Task.isCancelled else { break }
+                if launched < total {
+                    launched += 1
+                    group.addTask { await send() }
+                }
+            }
+            group.cancelAll()
+        }
+    }
+}
+
 /// Ranks names against what was typed into the command palette.
 public enum FuzzyMatch {
     /// A score for how well `text` matches `query`, higher being better, or nil when it does

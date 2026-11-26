@@ -6,7 +6,7 @@ struct ResponseView: View {
     let requestID: UUID
 
     enum Tab: String, CaseIterable, Identifiable {
-        case body = "Body", events = "Events", headers = "Headers", cookies = "Cookies", tests = "Tests", timing = "Timing", log = "Log", history = "History"
+        case body = "Body", events = "Events", headers = "Headers", cookies = "Cookies", tests = "Tests", timing = "Timing", tls = "TLS", log = "Log", history = "History"
         var id: String { rawValue }
     }
 
@@ -84,6 +84,7 @@ struct ResponseView: View {
             switch tab {
             case .events: return isEventStream
             case .cookies: return setsCookies
+            case .tls: return response?.tls != nil
             default: return true
             }
         }
@@ -261,17 +262,32 @@ struct ResponseView: View {
                     placeholder("Empty body", systemImage: "doc", detail: "The server sent no content.")
                 } else if let text = response.text {
                     let formatted = LineDiff.prettyJSON(response.body)
+                    // A saved filter narrows a JSON body down. A broken one shows the whole body and says why.
+                    let filter = model.request(requestID)?.responseFilter ?? ""
+                    let filtered: Result<String, Error>? = formatted == nil || filter.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? nil : Result { try JSONQuery.run(filter, on: response.body) }
                     if formatted != nil {
-                        HStack {
-                            Spacer()
+                        HStack(alignment: .top, spacing: 8) {
+                            ResponseFilterBar(
+                                filter: Binding(
+                                    get: { model.request(requestID)?.responseFilter ?? "" },
+                                    set: { new in
+                                        guard var request = model.request(requestID) else { return }
+                                        request.responseFilter = new.isEmpty ? nil : new
+                                        model.update(request)
+                                    }
+                                ),
+                                problem: { if case .failure(let error) = filtered { return error.localizedDescription } else { return nil } }()
+                            )
                             Toggle(isOn: $pretty) { Text("Format") }
                                 .toggleStyle(PillToggleStyle())
                                 .help("Indent the JSON for reading")
+                                .disabled((try? filtered?.get()) != nil)
                         }
                         .padding(.horizontal, 12)
                         .padding(.top, 8)
                     }
-                    let shown = pretty ? (formatted ?? text) : text
+                    let shown = (try? filtered?.get()) ?? (pretty ? (formatted ?? text) : text)
                     ReadOnlyCode(text: redactor?.redact(shown) ?? shown)
                 } else {
                     placeholder("Binary data", systemImage: "doc.zipper", detail: "\(response.body.count) bytes that are not text.")
@@ -279,6 +295,17 @@ struct ResponseView: View {
             }
         case .headers:
             ScrollView {
+                // What the headers mean, above the headers themselves.
+                let limit = RateLimit.parse(response.headers)
+                let tokens = JWT.find(request: prepared, response: response)
+                if limit != nil || !tokens.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let limit { RateLimitGauge(limit: limit) }
+                        if !tokens.isEmpty { JWTList(tokens: tokens, redactor: redactor) }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(response.headers.enumerated()), id: \.offset) { index, header in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -302,6 +329,14 @@ struct ResponseView: View {
             ScrollView {
                 TimingView(timings: response.timings, remoteAddress: response.remoteAddress)
                     .padding(12)
+            }
+        case .tls:
+            ScrollView {
+                if let tls = response.tls {
+                    TLSView(tls: tls)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         case .log:
             ReadOnlyCode(text: Self.logText(response.wireLog, redactor: redactor), syntax: .log)

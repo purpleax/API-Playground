@@ -270,6 +270,14 @@ struct NodeView: View {
                     model.selection = request.id
                     model.send(request.id)
                 }
+                if model.canExport(request.id) {
+                    Button("Repeat…") {
+                        model.selection = request.id
+                        model.openRepeat(request.id)
+                    }
+                    Button("Copy as cURL") { model.copySnippet(request.id, language: .curl) }
+                    Button("Copy as Code…") { model.showingSnippet = request.id }
+                }
                 Divider()
                 Button("Delete Request", role: .destructive) { model.deleteNode(request.id, in: collectionID) }
             }

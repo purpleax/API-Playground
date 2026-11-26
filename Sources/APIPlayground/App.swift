@@ -9,6 +9,7 @@ struct APIPlaygroundApp: App {
     @State private var model = AppModel.shared
     @State private var importingFiles = false
     @ObservedObject private var updater = Updater.shared
+    @AppStorage("showMenuBarItem") private var showMenuBarItem = true
 
     var body: some Scene {
         // One window: the app has a single workspace open at a time. A WindowGroup would
@@ -89,12 +90,30 @@ struct APIPlaygroundApp: App {
                     }
                     Button("Fill In an Example Message") { model.fillGRPCExample(id) }
                 }
+                Button("Repeat Request…") {
+                    if let id = model.selection { model.openRepeat(id) }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!canExportSelection)
+                Divider()
+                Button("Copy as cURL") {
+                    if let id = model.selection { model.copySnippet(id, language: .curl) }
+                }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(!canExportSelection)
+                Button("Copy as Code…") { model.showingSnippet = model.selection }
+                    .keyboardShortcut("c", modifiers: [.command, .option])
+                    .disabled(!canExportSelection)
                 Divider()
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
                 Button("Cookies…") { model.showingCookies = true }
+                Button("TLS and Client Certificates…") { model.showingClientCertificates = true }
             }
             CommandGroup(after: .sidebar) {
+                Button("Command Palette…") { model.showingPalette.toggle() }
+                    .keyboardShortcut("k")
+                Toggle("Show Mock Servers in Menu Bar", isOn: $showMenuBarItem)
                 Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
                     withAnimation(.snappy(duration: 0.2)) { model.sidebarVisible.toggle() }
                 }
@@ -146,6 +165,25 @@ struct APIPlaygroundApp: App {
                 .disabled(model.mock == nil && currentCollectionID == nil)
             }
         }
+
+        // Start and stop mock servers without bringing the window forward.
+        MenuBarExtra(isInserted: $showMenuBarItem) {
+            MockMenu()
+                .environment(model)
+        } label: {
+            if let session = model.mock {
+                Label(":\(String(session.port))", systemImage: "server.rack")
+                    .labelStyle(.titleAndIcon)
+                    .accessibilityLabel("API Playground mock server, running on port \(String(session.port))")
+            } else {
+                Image(systemName: "server.rack")
+                    .accessibilityLabel("API Playground mock servers")
+            }
+        }
+    }
+
+    private var canExportSelection: Bool {
+        model.selection.map(model.canExport) ?? false
     }
 
     /// The collection of the selected request, or the only collection when there is just one.
@@ -177,8 +215,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared.appearance.apply()
     }
 
+    /// Closing the window quits the app, unless a mock server is running and the menu-bar
+    /// item is there to stop it and to bring the window back.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        let menuBarItem = UserDefaults.standard.object(forKey: "showMenuBarItem") as? Bool ?? true
+        return !(menuBarItem && AppModel.shared.mock != nil)
     }
 
     /// Exports dropped on the app icon, or opened with "Open With".
@@ -262,6 +303,15 @@ struct ContentView: View {
                 workspace
             }
         }
+        .overlay {
+            if model.showingPalette {
+                CommandPalette { importingFiles = true }
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast { ToastView(text: toast) }
+        }
         .foregroundStyle(Theme.text)
         .tint(Theme.accent)
         .ignoresSafeArea(.container, edges: .top)
@@ -321,6 +371,33 @@ struct ContentView: View {
                     .environment(model)
                     .themedSheet()
             }
+        }
+        .sheet(isPresented: $model.showingClientCertificates) {
+            ClientCertificatesView()
+                .environment(model)
+                .themedSheet()
+        }
+        .sheet(isPresented: Binding(
+            get: { model.showingSnippet != nil },
+            set: { isShown in
+                if !isShown { model.showingSnippet = nil }
+            }
+        )) {
+            if let id = model.showingSnippet {
+                CodeSnippetView(requestID: id)
+                    .environment(model)
+                    .themedSheet()
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { model.repeatSession != nil },
+            set: { isShown in
+                if !isShown { model.closeRepeat() }
+            }
+        )) {
+            RepeatView()
+                .environment(model)
+                .themedSheet()
         }
         .sheet(isPresented: $model.showingEnvironments) {
             EnvironmentsView()
@@ -396,6 +473,9 @@ struct TopBar: View {
 
             environmentMenu
 
+            IconButton(systemImage: "command", active: model.showingPalette, help: "Command palette: go to a request or run a command (⌘K)") {
+                model.showingPalette.toggle()
+            }
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }

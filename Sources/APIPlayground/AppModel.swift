@@ -115,7 +115,29 @@ final class AppModel {
 
     private(set) var store: WorkspaceStore
     private let history: HistoryStore
-    let executor = RequestExecutor(tokens: OAuth2TokenStore(secrets: AppModel.secrets))
+    var executor = RequestExecutor(tokens: OAuth2TokenStore(secrets: AppModel.secrets))
+
+    /// Which client certificate to present to which host. Kept on this Mac, not in the workspace.
+    var clientCertificates: [ClientCertificateRule] = [] {
+        didSet { executor.clientCertificates = clientCertificates }
+    }
+    var showingClientCertificates = false
+    /// Whether to refuse servers whose certificate cannot be verified. Off suits a local
+    /// server with a self-signed certificate.
+    var verifyTLS = UserDefaults.standard.object(forKey: "verifyTLS") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(verifyTLS, forKey: "verifyTLS")
+            executor.options.verifyTLS = verifyTLS
+        }
+    }
+    /// The request whose code is on show, to copy as cURL or another language.
+    var showingSnippet: UUID?
+    var repeatSession: RepeatSession?
+    @ObservationIgnored var repeatTask: Task<Void, Never>?
+    var showingPalette = false
+    /// A short confirmation shown at the bottom of the window for a moment.
+    var toast: String?
+    @ObservationIgnored var toastTask: Task<Void, Never>?
 
     /// Responses that are still arriving, by request.
     var live: [UUID: LiveStream] = [:]
@@ -251,6 +273,10 @@ final class AppModel {
         store = WorkspaceStore(root: usableVault ?? Self.scratchPadURL, secrets: Self.secrets, localValues: Self.localValues)
         Theme.palette = Palette.named(UserDefaults.standard.string(forKey: "palette"))
         history = HistoryStore(root: Self.supportDirectory.appendingPathComponent("History", isDirectory: true))
+        executor.secrets = Self.secrets
+        executor.options.verifyTLS = verifyTLS
+        clientCertificates = Self.loadClientCertificates()
+        executor.clientCertificates = clientCertificates
         reload()
     }
 
@@ -490,6 +516,10 @@ final class AppModel {
     /// Saves what a run changed: variables set by scripts or extractions, and cookies.
     /// Only the run's own changes are applied, so requests in progress at the same time
     /// do not overwrite each other.
+    func saveRun(_ state: RunState, since initial: RunState, collectionID: UUID) {
+        keep(state, since: initial, collectionID: collectionID)
+    }
+
     private func keep(_ state: RunState, since initial: RunState, collectionID: UUID) {
         let cookies = RunState.merge(cookieJar, from: initial.cookies, to: state.cookies)
         if cookies != cookieJar { setCookies(cookies) }
@@ -868,7 +898,13 @@ final class AppModel {
     }
 
     func startMock(collectionID: UUID) {
-        guard let collection = collections.first(where: { $0.id == collectionID }) else { return }
+        Task { await startMockAndWait(collectionID: collectionID) }
+    }
+
+    /// Starts the mock and returns once it is listening, or nil if it could not start.
+    @discardableResult
+    func startMockAndWait(collectionID: UUID) async -> MockSession? {
+        guard let collection = collections.first(where: { $0.id == collectionID }) else { return nil }
         stopMock()
         let routes = MockServer.routes(for: collection)
         let server = MockServer(routes: routes)
@@ -880,7 +916,7 @@ final class AppModel {
                 }
             }
         }
-        Task {
+        do {
             do {
                 let port = try await server.start()
                 mockServer = server
@@ -902,8 +938,10 @@ final class AppModel {
                     session.environmentID = environment.id
                 }
                 mock = session
+                return session
             } catch {
                 show("Could not start the mock server", error)
+                return nil
             }
         }
     }

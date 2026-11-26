@@ -110,6 +110,8 @@ The first public release (1.0) is phases 1 to 5, plus importers for Insomnia, Br
 
 Because storage is plain files from phase 1, a collection folder can be put in Git by hand long before phase 5.
 
+Every item under [Features](#features) is now built as well, the last of them in November 2026: response filtering, the rate-limit gauge and JWT decoding, the TLS inspector and client certificates, copying a request as code, the repeat runner, the command palette, the menu-bar item and the Shortcuts actions. The README lists what has and has not been checked. The one thing in this plan that is not built is mock generation from a plain-language description, which stays optional (see [Risks](#risks)).
+
 ## Features
 
 ### Requests and responses

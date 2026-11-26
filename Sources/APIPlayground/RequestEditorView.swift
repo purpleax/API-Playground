@@ -25,12 +25,23 @@ struct RequestEditorView: View {
     var body: some View {
         let request = request
         VStack(alignment: .leading, spacing: 0) {
-            TextField("Request name", text: request.name)
-                .textFieldStyle(.plain)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
+            HStack(spacing: 6) {
+                TextField("Request name", text: request.name)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Theme.text)
+                if model.canExport(requestID) {
+                    IconButton(systemImage: "repeat", help: "Repeat: send this request many times and measure the response time (⇧⌘R)") {
+                        model.openRepeat(requestID)
+                    }
+                    IconButton(systemImage: "curlybraces", help: "Copy this request as cURL or code (⌥⌘C)") {
+                        model.showingSnippet = requestID
+                    }
+                }
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 10)
+            .padding(.top, 10)
 
             // The command bar: method, address and Send in one rounded strip.
             HStack(spacing: 0) {

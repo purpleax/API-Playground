@@ -316,6 +316,78 @@ private func query(_ expression: String) throws -> String {
     }
 }
 
+@Suite struct RepeatRunnerTests {
+    /// Counts how many sends are in progress, and the most there ever were.
+    final class Gauge: @unchecked Sendable {
+        private let lock = NSLock()
+        private var current = 0
+        private(set) var peak = 0
+        private(set) var started = 0
+
+        func enter() {
+            lock.lock()
+            current += 1
+            started += 1
+            peak = max(peak, current)
+            lock.unlock()
+        }
+
+        func leave() {
+            lock.lock()
+            current -= 1
+            lock.unlock()
+        }
+    }
+
+    @Test func sendsEveryOneWithNoMoreThanTheLimitAtOnce() async {
+        let gauge = Gauge()
+        var samples: [RepeatSample] = []
+        await RepeatRunner.run(count: 24, concurrency: 4) {
+            gauge.enter()
+            try? await Task.sleep(for: .milliseconds(15))
+            gauge.leave()
+            return RepeatSample(seconds: 0.015, status: 200)
+        } each: { sample in
+            samples.append(sample)
+            return true
+        }
+        #expect(samples.count == 24)
+        #expect(gauge.started == 24)
+        #expect(gauge.peak == 4)
+    }
+
+    @Test func stopsWhenAskedTo() async {
+        let gauge = Gauge()
+        var received = 0
+        await RepeatRunner.run(count: 100, concurrency: 2) {
+            gauge.enter()
+            try? await Task.sleep(for: .milliseconds(5))
+            gauge.leave()
+            return RepeatSample(seconds: 0.005, status: 200)
+        } each: { _ in
+            received += 1
+            return received < 5
+        }
+        #expect(received == 5)
+        #expect(gauge.started < 100)
+    }
+
+    @Test func oneAtATimeWhenAskedForFewerThanOne() async {
+        let gauge = Gauge()
+        var received = 0
+        await RepeatRunner.run(count: 3, concurrency: 0) {
+            gauge.enter()
+            gauge.leave()
+            return RepeatSample(seconds: 0, status: 200)
+        } each: { _ in
+            received += 1
+            return true
+        }
+        #expect(received == 3)
+        #expect(gauge.peak == 1)
+    }
+}
+
 @Suite struct FuzzyMatchTests {
     @Test func everyWordMustAppear() {
         #expect(FuzzyMatch.score("get user", in: "Get Users") != nil)
@@ -385,6 +457,11 @@ private func query(_ expression: String) throws -> String {
         private var process: Process?
 
         static let openssl = "/usr/bin/openssl"
+        /// A current OpenSSL, when Homebrew has installed one. Its servers speak TLS 1.3 the
+        /// way most real servers do, which the Mac's own LibreSSL does not.
+        static let modernOpenSSL = ["/opt/homebrew/bin/openssl", "/usr/local/bin/openssl"].first {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }
 
         @discardableResult
         static func run(_ arguments: [String], in folder: URL) throws -> Int32 {
@@ -399,7 +476,7 @@ private func query(_ expression: String) throws -> String {
             return process.terminationStatus
         }
 
-        init(requireClientCertificate: Bool) throws {
+        init(requireClientCertificate: Bool, serverTool: String = Server.openssl) throws {
             folder = FileManager.default.temporaryDirectory.appendingPathComponent("tls-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             // One self-signed certificate for the server, and one for the client that the server trusts.
@@ -426,7 +503,7 @@ private func query(_ expression: String) throws -> String {
             close(socket)
 
             let server = Process()
-            server.executableURL = URL(fileURLWithPath: Self.openssl)
+            server.executableURL = URL(fileURLWithPath: serverTool)
             var arguments = ["s_server", "-accept", String(port), "-cert", "server.pem", "-key", "server.key", "-www"]
             if requireClientCertificate { arguments += ["-Verify", "1", "-CAfile", "client.pem"] }
             server.arguments = arguments
@@ -482,6 +559,22 @@ private func query(_ expression: String) throws -> String {
     @Test func aSelfSignedServerIsRefusedWhenChecking() async throws {
         let server = try Server(requireClientCertificate: false)
         await #expect(throws: HTTPClientError.self) { try await server.send(HTTPOptions()) }
+    }
+
+    /// Against a current OpenSSL server the TLS 1.3 handshake fails with a client certificate,
+    /// and the client falls back to TLS 1.2. Skipped when no such OpenSSL is installed.
+    @Test(.enabled(if: Server.modernOpenSSL != nil))
+    func fallsBackToTLS12WhenTheNewerHandshakeFailsWithAClientCertificate() async throws {
+        let server = try Server(requireClientCertificate: true, serverTool: Server.modernOpenSSL!)
+        var options = HTTPOptions()
+        options.verifyTLS = false
+        options.clientCertificate = ClientCertificate(certificatePath: server.path("client.pem"), keyPath: server.path("client.key"))
+        let response = try await server.send(options)
+        #expect(response.status == 200)
+        // Either the newer handshake worked, or the fallback did and says so.
+        if response.tls?.protocolVersion == "TLSv1.2" {
+            #expect(response.wireLog.first?.text.contains("Sent again over TLS 1.2") == true)
+        }
     }
 
     @Test func presentsAClientCertificateFromPEMFilesOrPKCS12() async throws {

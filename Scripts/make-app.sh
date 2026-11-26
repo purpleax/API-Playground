@@ -47,6 +47,34 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Framewor
 cp "$BIN" "$APP/Contents/MacOS/APIPlayground"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# The description of the app's Shortcuts actions, which Shortcuts reads from the bundle.
+# Xcode makes this as a build step; here it is made from the same compiler output.
+CONFIG_DIR="$(tr '[:lower:]' '[:upper:]' <<< "${CONFIG:0:1}")${CONFIG:1}"
+SOURCES_LIST="$(find .build/out/Intermediates.noindex -path "*/$CONFIG_DIR/APIPlayground-p.build/Objects-normal/*/APIPlayground.SwiftFileList" 2>/dev/null | head -1)"
+if [ -z "$SOURCES_LIST" ]; then
+    echo "Could not find the build's file list, so the Shortcuts actions cannot be described." >&2
+    exit 1
+fi
+OBJECTS="$(dirname "$SOURCES_LIST")"
+INTENTS_WORK="$(mktemp -d)"
+ls "$PWD/$OBJECTS"/*.swiftconstvalues > "$INTENTS_WORK/constvalues.list"
+xcrun appintentsmetadataprocessor \
+    --output "$APP/Contents/Resources" \
+    --toolchain-dir "$(dirname "$(dirname "$(dirname "$(xcrun --find swiftc)")")")" \
+    --module-name APIPlayground \
+    --sdk-root "$(xcrun --show-sdk-path)" \
+    --xcode-version "$(xcodebuild -version | awk '/Build version/ {print $3}')" \
+    --platform-family macOS --deployment-target 14.0 \
+    --target-triple "$(basename "$OBJECTS")-apple-macos14.0" \
+    --source-file-list "$SOURCES_LIST" \
+    --swift-const-vals-list "$INTENTS_WORK/constvalues.list" \
+    --force > "$INTENTS_WORK/log.txt" 2>&1 || { cat "$INTENTS_WORK/log.txt" >&2; exit 1; }
+rm -rf "$INTENTS_WORK"
+if [ ! -f "$APP/Contents/Resources/Metadata.appintents/extract.actionsdata" ]; then
+    echo "The Shortcuts actions were not described: Metadata.appintents is missing." >&2
+    exit 1
+fi
+
 # The licences of the open-source software inside the app, which ask to be passed on with it.
 {
     echo "API Playground includes the following open-source software."
