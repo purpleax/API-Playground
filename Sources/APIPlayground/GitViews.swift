@@ -478,7 +478,7 @@ private struct GitSettingsTab: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Remote repository").sectionTitle()
-                    Text("Where Push sends commits and Pull gets them from, such as a repository on GitHub. The app signs in the same way Git does in Terminal on this Mac.")
+                    Text("Where Push sends commits and Pull gets them from, such as a repository on GitHub. An https:// address uses the sign-in Git keeps in the Keychain, or asks for one. A git@ address uses your SSH keys.")
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
@@ -715,6 +715,57 @@ private struct ChoiceCard: View {
 
 // MARK: - Clone
 
+/// Asks for the user name and token an HTTPS remote wants.
+struct GitSignInView: View {
+    @Environment(AppModel.self) private var model
+    let request: GitSignIn
+    @State private var user = ""
+    @State private var token = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign In to \(request.host)").font(.system(size: 17, weight: .bold))
+                Text("Enter your user name and a personal access token. Most Git hosts no longer take the account password here. The sign-in is kept in the Keychain, where Git in Terminal can use it too.")
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("User name").sectionTitle()
+                TextField("User name", text: $user).textFieldStyle(ThemedTextFieldStyle())
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Token").sectionTitle()
+                SecureField("Personal access token", text: $token).textFieldStyle(ThemedTextFieldStyle())
+            }
+            HStack(spacing: 10) {
+                Spacer()
+                Button("Cancel") { model.gitSignIn = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Sign In") {
+                    Task { await model.signIn(request, user: user.trimmingCharacters(in: .whitespaces), token: token.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(user.trimmingCharacters(in: .whitespaces).isEmpty || token.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+    }
+}
+
+extension View {
+    /// Shows the sign-in sheet over a Git screen when a remote asks for one.
+    func gitSignInSheet(_ model: AppModel) -> some View {
+        sheet(item: Binding(get: { model.gitSignIn }, set: { model.gitSignIn = $0 })) { request in
+            GitSignInView(request: request)
+                .environment(model)
+                .themedSheet()
+        }
+    }
+}
+
 struct CloneView: View {
     @Environment(AppModel.self) private var model
     @State private var remote = ""
@@ -814,6 +865,7 @@ struct CloneView: View {
         .frame(width: 560, height: 400)
         .disabled(model.gitBusy != nil)
         .onAppear { model.gitBanner = nil }
+        .gitSignInSheet(model)
     }
 
     private func chooseParent() {

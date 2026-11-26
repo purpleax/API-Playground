@@ -149,10 +149,19 @@ turns the open vault into a repository.
 - Secret values, current values, cookies, history and OAuth tokens are never committed:
   they live in the Keychain or the app's private data, outside the workspace.
 
-Git Sync runs the `git` command already on this Mac (Apple's Command Line Tools or
-Homebrew), so it signs in to a remote the same way Git does in Terminal. It never asks for a
-password itself: if the remote refuses, it says so. All of it is in `Sources/APIEngine/Git.swift`,
-so a built-in library can replace the command before the app ships.
+Git Sync uses libgit2, built into the app, so Git does not need to be installed on the Mac.
+All of it is in `Sources/APIEngine/Git.swift`. Signing in to a remote:
+
+- **https:// addresses** use the sign-in Git itself keeps in the Keychain for that server,
+  if there is one. Otherwise, or if the remote turns it down, the app asks for a user name
+  and a personal access token, saves them in the Keychain the same way Git does, and tries
+  again.
+- **git@ (SSH) addresses** run the Mac's own `ssh`, so they use the keys in your SSH agent
+  or Keychain. A key that needs its passphrase typed, or a server whose host key has never
+  been accepted, fails with a message instead of asking.
+
+Not checked against a real host yet: both kinds of sign-in were only read through, because
+the tests and the on-screen check used a remote in a local folder.
 
 Limits: no stash, rebase, tags or amend; a merge needs a clean workspace first; a vault
 inside a larger repository is not synced; and committing is refused while the mock server
@@ -326,6 +335,42 @@ Open it:
 open "build/API Playground.app"
 ```
 
+## Releasing
+
+`Scripts/release.sh` makes the download, `build/release/API-Playground-VERSION.dmg`:
+
+1. Runs the tests.
+2. Builds for Apple silicon and Intel, with Sparkle and the icon inside the app.
+3. Signs with the Developer ID certificate in the Keychain, with the hardened runtime.
+4. Sends the app to Apple for notarisation and staples the answer to it.
+5. Packs the app and a link to Applications into a disk image, then signs, notarises and
+   staples that too.
+6. If an update feed is set, signs the disk image with the update key and writes
+   `appcast.xml` beside it.
+
+Settings are in `Scripts/release.conf`: the version and build number (raise both for every
+release), the update feed's address, and the names of the Keychain items below. Two things
+must be set up once on the Mac that makes releases:
+
+- **Notarisation sign-in.** Run `xcrun notarytool store-credentials api-playground-notary`
+  and give it the Apple ID, team and an app-specific password. Until then `release.sh`
+  stops and says so; `SKIP_NOTARISE=1 Scripts/release.sh` makes a signed disk image that is
+  not notarised.
+- **Update key.** Sparkle's private key is in the login Keychain under the account
+  `api-playground`. Keep a backup: without it no update can be signed. Export one with
+  `.build/artifacts/sparkle/Sparkle/bin/generate_keys --account api-playground -x FILE`.
+
+Updates stay switched off, and the app has no "Check for Updates…", until `FEED_URL` in
+`release.conf` names where `appcast.xml` will be hosted. The test copy never updates.
+
+The icon is a placeholder drawn by `Scripts/make-icon.swift`, which writes
+`Resources/AppIcon.icns`. The licences of Sparkle and libgit2 are copied into the app as
+`Contents/Resources/Acknowledgements.txt`.
+
+Not checked: notarisation has not been run, because the sign-in for it is not set up; an
+update has never been downloaded and installed, because there is no feed yet; and the
+Intel half of the app has not been run.
+
 ## Layout
 
 | Path | Contents |
@@ -336,3 +381,5 @@ open "build/API Playground.app"
 | `Tests/APIEngineTests` | Engine tests. HTTP tests use a local server and need no internet. |
 | `Tests/Support` | A small gRPC server, run with Node, that the gRPC tests call. Those tests are skipped where Node is not installed. |
 | `Scripts/make-app.sh` | Builds the app bundle. |
+| `Scripts/release.sh` | Makes the signed, notarised disk image. Settings in `Scripts/release.conf`. |
+| `Scripts/make-icon.swift` | Draws the placeholder icon into `Resources/`. |

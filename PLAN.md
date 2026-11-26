@@ -43,7 +43,7 @@ The app has its own name and visual design. It matches Insomnia's feature set, n
 | Scripting | JavaScriptCore, with a Postman-compatible `pm` object | No bundled runtime, and imported scripts mostly run as they are |
 | Linting | A linter built into the app for now, using Spectral's rule names and ruleset format; `vacuum` as a helper binary if full Spectral compatibility is needed | The built-in linter needs no download and gives line numbers directly. vacuum reads every Spectral ruleset without needing Node |
 | gRPC | libcurl's HTTP/2, with protobuf messages converted using the server's own description | The spike showed no helper binary is needed for reflection or dynamic messages |
-| Git | The `git` command on the Mac for now, kept behind one file; libgit2 before shipping | The command needs no download and uses the sign-in Git already has. libgit2 removes the dependency on a system Git install |
+| Git | libgit2, built into the app (it replaced the `git` command in November 2026) | No dependency on a system Git install. HTTPS sign-ins come from the Keychain items Git itself uses; SSH goes through the Mac's own `ssh` |
 | Mock servers | In-process HTTP server on localhost | No separate process to manage |
 | Distribution | Notarised direct download, updates through Sparkle | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
 

@@ -176,6 +176,8 @@ final class AppModel {
     var gitBanner: GitBanner?
     var showingGit = false
     var showingClone = false
+    /// A remote that asked for a sign-in, and what to try again once it is given.
+    var gitSignIn: GitSignIn?
     /// The conflicts of a merge that is waiting for choices.
     var mergeSession: MergeSession?
     @ObservationIgnored var gitRefreshTask: Task<Void, Never>?

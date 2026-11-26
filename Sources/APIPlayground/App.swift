@@ -8,6 +8,7 @@ struct APIPlaygroundApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel.shared
     @State private var importingFiles = false
+    @ObservedObject private var updater = Updater.shared
 
     var body: some Scene {
         // One window: the app has a single workspace open at a time. A WindowGroup would
@@ -27,6 +28,12 @@ struct APIPlaygroundApp: App {
         .defaultSize(width: 1360, height: 840)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                if updater.isAvailable {
+                    Button("Check for Updates…") { updater.checkForUpdates() }
+                        .disabled(!updater.canCheck)
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Request") { model.newRequestInCurrentCollection() }
                     .keyboardShortcut("n")
@@ -286,6 +293,7 @@ struct ContentView: View {
             GitView()
                 .environment(model)
                 .themedSheet()
+                .gitSignInSheet(model)
         }
         .sheet(isPresented: $model.showingRuleset) {
             RulesetView()

@@ -19,6 +19,14 @@ struct GitState {
     var identity: GitIdentity
 }
 
+/// A remote that turned the app away for want of a sign-in.
+struct GitSignIn: Identifiable {
+    var host: String
+    /// The work that was stopped, to be run again once the sign-in is saved.
+    var retry: @MainActor () async -> Void
+    var id: String { host }
+}
+
 struct GitBanner: Equatable {
     var text: String
     var isError = false
@@ -91,7 +99,7 @@ extension AppModel {
             return
         }
         let state = await Task.detached { () -> GitState? in
-            guard let runner = try? GitRunner.standard(), let repo = GitRepository.open(vault, runner: runner) else { return nil }
+            guard let repo = GitRepository.open(vault) else { return nil }
             return try? AppModel.gitSnapshot(repo)
         }.value
         guard vaultURL == vault else { return }
@@ -121,7 +129,10 @@ extension AppModel {
     /// Runs Git work away from the main thread, one piece at a time.
     /// Looks at the repository again before returning.
     /// - Returns: The work's result, or nil when it failed or Git was already busy.
-    private func gitRun<T: Sendable>(_ label: String, _ work: @escaping @Sendable (GitRepository) throws -> T) async -> T? {
+    /// - Parameter retry: What to run again if the remote asks for a sign-in and gets one.
+    private func gitRun<T: Sendable>(
+        _ label: String, retry: (@MainActor () async -> Void)? = nil, _ work: @escaping @Sendable (GitRepository) throws -> T
+    ) async -> T? {
         guard let repo = git?.repo, gitBusy == nil else { return nil }
         flushPendingSaves()
         gitBusy = label
@@ -131,7 +142,12 @@ extension AppModel {
         do {
             result = try await Task.detached { try work(repo) }.value
         } catch {
-            report(error.localizedDescription, isError: true)
+            if let host = (error as? GitError)?.signInHost, let retry {
+                showingGit = showingGit || !showingClone
+                gitSignIn = GitSignIn(host: host, retry: retry)
+            } else {
+                report(error.localizedDescription, isError: true)
+            }
         }
         // Still busy while looking again, so the screen never shows the state from before.
         await loadGit()
@@ -144,7 +160,7 @@ extension AppModel {
         guard let vault = vaultURL, git == nil else { return }
         flushPendingSaves()
         do {
-            _ = try await Task.detached { try GitRepository.initialise(vault, runner: .standard()) }.value
+            _ = try await Task.detached { try GitRepository.initialise(vault) }.value
             await loadGit()
             showingGit = true
         } catch {
@@ -164,13 +180,30 @@ extension AppModel {
         gitBanner = nil
         defer { gitBusy = nil }
         do {
-            _ = try await Task.detached { try GitRepository.clone(remote, to: folder, runner: .standard()) }.value
+            _ = try await Task.detached { try GitRepository.clone(remote, to: folder) }.value
             showingClone = false
             openVault(folder)
             await loadGit()
         } catch {
-            gitBanner = GitBanner(text: error.localizedDescription, isError: true)
+            if let host = (error as? GitError)?.signInHost {
+                gitSignIn = GitSignIn(host: host) { [weak self] in await self?.clone(remote, into: folder) }
+            } else {
+                gitBanner = GitBanner(text: error.localizedDescription, isError: true)
+            }
         }
+    }
+
+    /// Saves a sign-in for a remote in the Keychain, then tries again what was stopped for want of it.
+    func signIn(_ request: GitSignIn, user: String, token: String) async {
+        do {
+            try GitCredentials.save(host: request.host, user: user, password: token)
+        } catch {
+            gitBanner = GitBanner(text: error.localizedDescription, isError: true)
+            gitSignIn = nil
+            return
+        }
+        gitSignIn = nil
+        await request.retry()
     }
 
     // MARK: Everyday work
@@ -186,20 +219,20 @@ extension AppModel {
     }
 
     func push() async {
-        let done: Void? = await gitRun("Pushing…") { try $0.push() }
+        let done: Void? = await gitRun("Pushing…", retry: { [weak self] in await self?.push() }) { try $0.push() }
         if done != nil { report("Pushed to the remote.") }
     }
 
     /// Asks the remote what it has, without changing anything here.
     func fetch() async {
-        let done: Void? = await gitRun("Checking the remote…") { try $0.fetch() }
+        let done: Void? = await gitRun("Checking the remote…", retry: { [weak self] in await self?.fetch() }) { try $0.fetch() }
         if done != nil, let status = git?.status {
             report(status.behind == 0 ? "Nothing new on the remote." : "The remote has \(status.behind) new \(status.behind == 1 ? "commit" : "commits"). Pull to get them.")
         }
     }
 
     func pull() async {
-        guard let outcome = await gitRun("Pulling…", { try $0.pull() }) else {
+        guard let outcome = await gitRun("Pulling…", retry: { [weak self] in await self?.pull() }, { try $0.pull() }) else {
             return
         }
         await finish(outcome, upToDate: "Already up to date.", done: "Pulled the latest changes.")

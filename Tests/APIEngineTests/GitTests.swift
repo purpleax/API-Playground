@@ -3,24 +3,23 @@ import Testing
 @testable import APIEngine
 
 /// A temporary folder with a remote repository and any number of people working from it.
-/// Git is cut off from this Mac's own settings, so the tests behave the same everywhere.
 private struct Sandbox {
     let dir: URL
-    let runner: GitRunner
+    static let person = GitIdentity(name: "Test Person", email: "test@example.com")
 
     init() throws {
         dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("git-tests-\(UUID().uuidString)", isDirectory: true)
             .resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let executable = try #require(GitRunner.locate())
-        runner = GitRunner(executable: executable, environment: [
-            "GIT_CONFIG_GLOBAL": "/dev/null",
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_AUTHOR_NAME": "Test Person", "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test Person", "GIT_COMMITTER_EMAIL": "test@example.com",
-        ])
-        try runner.run(["init", "--bare", "-b", "main", "remote.git"], in: dir)
+        try GitRepository.initialiseBare(dir.appendingPathComponent("remote.git", isDirectory: true))
+    }
+
+    /// A new repository, with a name and email of its own so this Mac's settings do not matter.
+    func initialise(_ folder: URL) throws -> GitRepository {
+        let repo = try GitRepository.initialise(folder)
+        try repo.setIdentity(Self.person)
+        return repo
     }
 
     var remote: String { dir.appendingPathComponent("remote.git").path }
@@ -32,7 +31,7 @@ private struct Sandbox {
     /// The first person: makes a workspace, commits it and pushes it.
     func start(_ collection: APICollection) throws -> GitRepository {
         let folder = dir.appendingPathComponent("alice", isDirectory: true)
-        let repo = try GitRepository.initialise(folder, runner: runner)
+        let repo = try initialise(folder)
         try store(repo).save(collection)
         try repo.commitAll(message: "Start")
         try repo.setRemoteURL(remote)
@@ -41,7 +40,9 @@ private struct Sandbox {
     }
 
     func clone(_ name: String) throws -> GitRepository {
-        try GitRepository.clone(remote, to: dir.appendingPathComponent(name, isDirectory: true), runner: runner)
+        let repo = try GitRepository.clone(remote, to: dir.appendingPathComponent(name, isDirectory: true))
+        try repo.setIdentity(Self.person)
+        return repo
     }
 
     func store(_ repo: GitRepository) -> WorkspaceStore {
@@ -213,18 +214,18 @@ private func object(_ data: Data) throws -> [String: Any] {
         let sandbox = try Sandbox()
         defer { sandbox.cleanUp() }
         let folder = sandbox.dir.appendingPathComponent("outer", isDirectory: true)
-        _ = try GitRepository.initialise(folder, runner: sandbox.runner)
+        _ = try sandbox.initialise(folder)
         let inner = folder.appendingPathComponent("inner", isDirectory: true)
         try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
-        #expect(GitRepository.open(folder, runner: sandbox.runner) != nil)
-        #expect(GitRepository.open(inner, runner: sandbox.runner) == nil)
-        #expect(GitRepository.open(sandbox.dir, runner: sandbox.runner) == nil)
+        #expect(GitRepository.open(folder) != nil)
+        #expect(GitRepository.open(inner) == nil)
+        #expect(GitRepository.open(sandbox.dir) == nil)
     }
 
     @Test func statusListsEachKindOfChange() throws {
         let sandbox = try Sandbox()
         defer { sandbox.cleanUp() }
-        let repo = try GitRepository.initialise(sandbox.dir.appendingPathComponent("work"), runner: sandbox.runner)
+        let repo = try sandbox.initialise(sandbox.dir.appendingPathComponent("work"))
         #expect(try repo.status().hasCommits == false)
         try Data("one".utf8).write(to: repo.root.appendingPathComponent("keep me.txt"))
         try Data("two".utf8).write(to: repo.root.appendingPathComponent("remove.txt"))
@@ -249,7 +250,7 @@ private func object(_ data: Data) throws -> [String: Any] {
     @Test func discardPutsAFileBack() throws {
         let sandbox = try Sandbox()
         defer { sandbox.cleanUp() }
-        let repo = try GitRepository.initialise(sandbox.dir.appendingPathComponent("work"), runner: sandbox.runner)
+        let repo = try sandbox.initialise(sandbox.dir.appendingPathComponent("work"))
         let kept = repo.root.appendingPathComponent("kept.txt")
         try Data("one".utf8).write(to: kept)
         try repo.commitAll(message: "First")
