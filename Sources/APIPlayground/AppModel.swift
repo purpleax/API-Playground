@@ -1027,13 +1027,14 @@ final class AppModel {
         }
     }
 
-    func importPostmanFiles(_ urls: [URL]) {
+    /// Imports exports from Postman, Insomnia and Bruno: files, zips and Bruno collection folders.
+    func importFiles(_ urls: [URL]) {
         var lines: [String] = []
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let batch = try PostmanImporter.importFile(at: url)
+                let batch = try Importer.importFile(at: url)
                 for document in batch.documents {
                     lines.append(contentsOf: add(document))
                 }
@@ -1056,11 +1057,11 @@ final class AppModel {
     }
 
     /// Adds an imported document to the workspace and returns lines for the import report.
-    private func add(_ document: PostmanDocument) -> [String] {
+    private func add(_ document: ImportedDocument) -> [String] {
         switch document {
         case .collection(var collection, let report):
             var verb = "Imported"
-            // Importing a newer export of the same Postman collection updates it in place.
+            // Importing a newer export of the same collection updates it in place.
             if let postmanID = collection.postmanID,
                let index = collections.firstIndex(where: { $0.postmanID == postmanID }) {
                 // Requests keep their ids, and so their history, when their name and place are unchanged.
@@ -1081,6 +1082,19 @@ final class AppModel {
             lines.append(contentsOf: report.warnings)
             return lines
 
+        case .spec(let name, let text):
+            // A spec that came with a collection, such as an Insomnia design document.
+            let isJSON = text.drop(while: \.isWhitespace).first == "{"
+            let spec = SpecFile(file: store.newSpecFileName(for: name, extension: isJSON ? "json" : "yaml"), text: text)
+            do {
+                try store.save(spec)
+                specs.append(spec)
+                specs.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                return ["Imported API spec \"\(spec.name)\"."]
+            } catch {
+                return ["The API spec \"\(name)\" could not be saved: \(error.localizedDescription)"]
+            }
+
         case .environment(var environment, let isGlobals, let report):
             if isGlobals {
                 var merged = globals
@@ -1100,7 +1114,7 @@ final class AppModel {
             }
             saveEnvironment(environment)
             if activeEnvironmentID == nil { activeEnvironmentID = environment.id }
-            return ["\(verb) environment \"\(environment.name)\": \(Self.count(report.variables, "variable"))."]
+            return ["\(verb) environment \"\(environment.name)\": \(Self.count(report.variables, "variable"))."] + report.warnings
         }
     }
 

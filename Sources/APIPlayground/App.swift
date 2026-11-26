@@ -7,13 +7,13 @@ import UniformTypeIdentifiers
 struct APIPlaygroundApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel.shared
-    @State private var importingPostman = false
+    @State private var importingFiles = false
 
     var body: some Scene {
         // One window: the app has a single workspace open at a time. A WindowGroup would
         // open an extra window each time a file is opened with the app.
         Window("API Playground", id: "main") {
-            ContentView(importingPostman: $importingPostman)
+            ContentView(importingFiles: $importingFiles)
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 520)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
@@ -35,7 +35,7 @@ struct APIPlaygroundApp: App {
                 Button("New Collection") { model.newCollection() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
-                Button("Import Postman Files…") { importingPostman = true }
+                Button("Import…") { importingFiles = true }
                     .keyboardShortcut("o")
                 Button("Import cURL from Clipboard") { model.importCurlFromClipboard() }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -174,20 +174,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Postman files dropped on the app icon, or opened with "Open With".
+    /// Exports dropped on the app icon, or opened with "Open With".
     func application(_ application: NSApplication, open urls: [URL]) {
-        AppModel.shared.importPostmanFiles(urls)
+        AppModel.shared.importFiles(urls)
     }
 }
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
-    @Binding var importingPostman: Bool
+    @Binding var importingFiles: Bool
 
     @ViewBuilder
     private var workspace: some View {
         VStack(spacing: 0) {
-            TopBar(importingPostman: $importingPostman)
+            TopBar(importingFiles: $importingFiles)
             HStack(spacing: 0) {
                 if model.sidebarVisible {
                     SidebarView()
@@ -235,9 +235,9 @@ struct ContentView: View {
             EmptyState(
                 systemImage: "bolt.horizontal.fill",
                 title: "Nothing selected",
-                detail: "Pick a request from the sidebar, or bring in a Postman collection to get started."
+                detail: "Pick a request from the sidebar, or bring in your collections from Postman, Insomnia or Bruno."
             ) {
-                Button("Import Postman Files…") { importingPostman = true }
+                Button("Import…") { importingFiles = true }
                     .buttonStyle(PrimaryButtonStyle(large: true))
                 Button("New Request") { model.newRequestInCurrentCollection() }
                     .buttonStyle(SecondaryButtonStyle(large: true))
@@ -266,8 +266,8 @@ struct ContentView: View {
                 .themedSheet()
                 .id(model.paletteID)
         }
-        .fileImporter(isPresented: $importingPostman, allowedContentTypes: [.json, .zip], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { model.importPostmanFiles(urls) }
+        .fileImporter(isPresented: $importingFiles, allowedContentTypes: AppModel.importTypes, allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { model.importFiles(urls) }
         }
         .task {
             await model.windowDidAppear()
@@ -339,7 +339,7 @@ struct ContentView: View {
 /// The custom bar across the top of the window, in place of a standard toolbar.
 struct TopBar: View {
     @Environment(AppModel.self) private var model
-    @Binding var importingPostman: Bool
+    @Binding var importingFiles: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -398,8 +398,8 @@ struct TopBar: View {
                        help: "Hide secrets: mask tokens, keys and passwords on screen. Requests still send the real values.") {
                 model.hideSecrets.toggle()
             }
-            IconButton(systemImage: "square.and.arrow.down", help: "Import Postman collections and environments") {
-                importingPostman = true
+            IconButton(systemImage: "square.and.arrow.down", help: "Import from Postman, Insomnia or Bruno") {
+                importingFiles = true
             }
         }
         .padding(.trailing, 12)
@@ -456,4 +456,9 @@ struct TopBar: View {
         .fixedSize()
         .help("The environment whose variables fill in {{placeholders}}")
     }
+}
+
+extension AppModel {
+    /// What Import accepts: Postman and Insomnia files, zips, and Bruno folders and requests.
+    static let importTypes: [UTType] = [.json, .yaml, .zip, .folder] + [UTType(filenameExtension: "bru")].compactMap { $0 }
 }

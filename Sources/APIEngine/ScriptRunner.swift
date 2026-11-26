@@ -485,7 +485,8 @@ public enum ScriptRunner {
             request: host.request, tests: tests, logs: logs, skipRequest: skipRequest
           });
         },
-        response: res
+        response: res,
+        host: host
       };
     })(JSON.parse(__hostJSON));
 
@@ -494,6 +495,88 @@ public enum ScriptRunner {
     ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
       console[level] = function () { __pm.log(level, arguments); };
     });
+
+    // Insomnia's scripts use the same API under another name.
+    var insomnia = pm;
+
+    // Bruno's API, for scripts imported from it: bru, req, res, and test and expect as globals.
+    var test = pm.test;
+    var expect = pm.expect;
+    var bru = (function () {
+      function no(name) { return function () { throw new Error('bru.' + name + ' is not supported yet'); }; }
+      // Bruno's runtime variables last between requests. A collection variable set by a script
+      // does too, and its value stays on this Mac.
+      return {
+        getVar: function (k) { return pm.variables.get(k); },
+        setVar: function (k, v) { pm.collectionVariables.set(k, v); },
+        hasVar: function (k) { return pm.variables.has(k); },
+        deleteVar: function (k) { pm.collectionVariables.unset(k); },
+        getEnvVar: function (k) { return pm.environment.get(k); },
+        setEnvVar: function (k, v) { pm.environment.set(k, v); },
+        hasEnvVar: function (k) { return pm.environment.has(k); },
+        deleteEnvVar: function (k) { pm.environment.unset(k); },
+        getGlobalEnvVar: function (k) { return pm.globals.get(k); },
+        setGlobalEnvVar: function (k, v) { pm.globals.set(k, v); },
+        getCollectionVar: function (k) { return pm.collectionVariables.get(k); },
+        getFolderVar: function (k) { return pm.variables.get(k); },
+        getRequestVar: function (k) { return pm.variables.get(k); },
+        getProcessEnv: function () { return undefined; },
+        getEnvName: function () { return pm.environment.name; },
+        getCollectionName: function () { return undefined; },
+        interpolate: function (text) { return typeof text === 'string' ? pm.variables.replaceIn(text) : text; },
+        cwd: function () { return ''; },
+        sleep: no('sleep'),
+        setNextRequest: no('setNextRequest'),
+        runRequest: no('runRequest'),
+        sendRequest: no('sendRequest'),
+        runner: { skipRequest: function () { pm.execution.skipRequest(); }, stopExecution: no('runner.stopExecution'), setNextRequest: no('runner.setNextRequest') }
+      };
+    })();
+    var req = (function () {
+      var r = __pm.host.request;
+      function parsed(text) { try { return JSON.parse(text); } catch (e) { return text; } }
+      var self = {
+        getUrl: function () { return r.url; },
+        setUrl: function (u) { r.url = String(u); },
+        getMethod: function () { return r.method; },
+        setMethod: function (m) { r.method = String(m).toUpperCase(); },
+        getName: function () { return pm.info.requestName; },
+        getHeader: function (n) { return pm.request.headers.get(n); },
+        getHeaders: function () { return pm.request.headers.toObject(); },
+        setHeader: function (n, v) { pm.request.headers.upsert({ key: n, value: v }); },
+        setHeaders: function (all) { Object.keys(all || {}).forEach(function (n) { self.setHeader(n, all[n]); }); },
+        deleteHeader: function (n) { pm.request.headers.remove(n); },
+        getBody: function () { return parsed(r.body); },
+        setBody: function (b) { r.body = typeof b === 'string' ? b : JSON.stringify(b); },
+        setTimeout: function () {},
+        setMaxRedirects: function () {}
+      };
+      ['url', 'method'].forEach(function (name) {
+        Object.defineProperty(self, name, { get: function () { return r[name]; }, enumerable: true });
+      });
+      Object.defineProperty(self, 'headers', { get: function () { return self.getHeaders(); }, enumerable: true });
+      Object.defineProperty(self, 'body', { get: function () { return self.getBody(); }, enumerable: true });
+      return self;
+    })();
+    var res = (function () {
+      var r = __pm.response;
+      if (!r) return undefined;
+      var body = r.body;
+      try { body = JSON.parse(r.body); } catch (e) {}
+      // Bruno gives header names in lower case.
+      var headers = {};
+      r.headers.forEach(function (h) { headers[h.key.toLowerCase()] = h.value; });
+      return {
+        status: r.code, statusText: r.status, headers: headers, body: body, responseTime: r.responseTime,
+        getStatus: function () { return r.code; },
+        getStatusText: function () { return r.status; },
+        getHeader: function (n) { return headers[String(n).toLowerCase()]; },
+        getHeaders: function () { return headers; },
+        getBody: function () { return body; },
+        getResponseTime: function () { return r.responseTime; },
+        getSize: function () { return { body: r.responseSize, headers: 0, total: r.responseSize }; }
+      };
+    })();
 
     // The older "postman" API and its globals, which many saved scripts still use.
     var tests = __pm.legacyTests;

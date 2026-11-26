@@ -27,16 +27,26 @@ public enum PostmanImportError: Error, LocalizedError, Equatable {
     }
 }
 
-public enum PostmanDocument: Sendable {
+public enum ImportedDocument: Sendable {
     case collection(APICollection, ImportReport)
     /// `isGlobals` is true for a Postman globals export.
     case environment(APIEnvironment, isGlobals: Bool, ImportReport)
+    /// An API spec that came with a collection, such as an Insomnia design document.
+    case spec(name: String, text: String)
+}
+
+/// The documents found in one imported file or folder, and the entries that could not be used.
+public struct ImportBatch: Sendable {
+    public var documents: [ImportedDocument] = []
+    public var skipped: [String] = []
+
+    public init() {}
 }
 
 /// Reads Postman Collection v2.0 and v2.1 files and Postman environment files.
 public enum PostmanImporter {
 
-    public static func importDocument(data: Data) throws -> PostmanDocument {
+    public static func importDocument(data: Data) throws -> ImportedDocument {
         guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             throw PostmanImportError.notJSON
         }
@@ -58,11 +68,7 @@ public enum PostmanImporter {
         throw PostmanImportError.notPostman
     }
 
-    /// The documents found in one imported file, and the entries that were not Postman exports.
-    public struct Batch: Sendable {
-        public var documents: [PostmanDocument] = []
-        public var skipped: [String] = []
-    }
+    public typealias Batch = ImportBatch
 
     /// Reads a Postman export from disk: a single JSON file, a backup file holding several
     /// collections and environments, or the zip that Postman's "Export Data" produces.
@@ -103,7 +109,7 @@ public enum PostmanImporter {
         return batch
     }
 
-    private static func add(_ data: Data, name: String, to batch: inout Batch) {
+    static func add(_ data: Data, name: String, to batch: inout Batch) {
         if let document = try? importDocument(data: data) {
             batch.documents.append(document)
             return

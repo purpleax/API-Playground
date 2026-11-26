@@ -106,7 +106,7 @@ Postman pre-request and test scripts are preserved on import in phase 1 but do n
 | 5. Git Sync | Clone, branch, commit, push/pull, 3-way merge view | Two people can edit the same collection and merge |
 | 6. Spec and gRPC | OpenAPI editor with live route preview, linting, generating collections and mocks from a spec, gRPC with server reflection | A spec produces a working collection and mock |
 
-The first public release (1.0) is phases 1 to 5, plus importers for Insomnia, Bruno and OpenAPI. Phase 6 follows.
+The first public release (1.0) is phases 1 to 5, plus importers for Insomnia, Bruno and OpenAPI. Phase 6 follows. All of these are now built; the Insomnia and Bruno importers were written from those apps' documentation and source, and still need trying against real exports.
 
 Because storage is plain files from phase 1, a collection folder can be put in Git by hand long before phase 5.
 

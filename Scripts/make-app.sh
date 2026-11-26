@@ -62,7 +62,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Postman export</string>
+            <string>API client export</string>
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
@@ -70,6 +70,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>LSItemContentTypes</key>
             <array>
                 <string>public.json</string>
+                <string>public.yaml</string>
+                <string>public.folder</string>
             </array>
         </dict>
     </array>

@@ -9,6 +9,12 @@ Phases 1 to 6 are built.
 Covered by engine tests:
 
 - Postman import: Collection v2.0/v2.1, environments, globals, backup files holding several of each, and the zip from Postman's "Export Data"
+- Insomnia import: export format 4 (JSON or YAML) and format 5 (YAML), with folders,
+  environments, design documents' specs, gRPC requests, and response tags turned into
+  "Save from response" rules
+- Bruno import: a collection folder of `.bru` files or of YAML files (Bruno 3), a single
+  `.bru` request, and the one-file JSON export, with environments, assertions and scripts
+- Insomnia's `insomnia` and Bruno's `bru`, `req`, `res`, `test` and `expect` in scripts
 - Importing a collection again updates it in place, and requests keep their history
 - Collections stored as one file per request, folder and environment
 - `{{variable}}` resolution with Postman's scope order
@@ -39,6 +45,9 @@ Covered by engine tests:
 Checked by hand in the running app:
 
 - Importing files and a zip, the import report, browsing, editing and sending
+- An Insomnia export and a Bruno collection folder, each made by hand, opened with the
+  app: both imported, and in each a request used a token saved by the request before it,
+  with the imported scripts and assertions passing
 - Response body, headers, timing, log, history and diff
 - The environment editor, including a "This Mac only" value
 - Imported Postman test scripts running unchanged, with results and console output
@@ -78,6 +87,12 @@ Not yet checked:
   identity, and the folder chooser in Clone a Repository
 - Push and pull against a real host such as GitHub (tests use a remote on this Mac)
 - The zip import against a real Postman "Export Data" file (tested with a hand-made zip)
+- Insomnia and Bruno imports against files those apps wrote themselves: every test file
+  was written by hand from their documentation and source. Bruno's YAML format is the
+  least certain, and its OAuth 2 settings and post-response actions are read by guesswork
+  or not at all
+- Choosing a Bruno folder or a YAML file in the Import file picker (the check opened them
+  with the app instead)
 - cURL import from the clipboard, the file-picker import, and switching to a Local Vault
 - Form, multipart, GraphQL and file body editors
 - Secret variables with the real Keychain (tests use an in-memory store)
@@ -142,6 +157,50 @@ so a built-in library can replace the command before the app ships.
 Limits: no stash, rebase, tags or amend; a merge needs a clean workspace first; a vault
 inside a larger repository is not synced; and committing is refused while the mock server
 runs, because it keeps a temporary environment in the workspace.
+
+### Importing from Postman, Insomnia and Bruno
+
+File > Import (⌘O) takes any of these, and works out which app each came from. Dropping
+them on the app's icon does the same.
+
+| From | What to choose |
+| --- | --- |
+| Postman | A collection or environment file, a backup file, or the zip from "Export Data" |
+| Insomnia | An export file, JSON or YAML (format 4), or a collection's YAML file (format 5) |
+| Bruno | The collection's folder, one `.bru` file, or the JSON from "Export collection" |
+
+A zip can hold any mix of them. The report afterwards lists what came across and what
+needs attention. All of it is in `Sources/APIEngine`: `Importer.swift` chooses, and
+`PostmanImporter.swift`, `InsomniaImporter.swift` and `BrunoImporter.swift` read.
+
+Where the other app has something this one does not, the import converts it:
+
+- **Insomnia's base environment** becomes the collection's variables, and each
+  sub-environment an environment. Nested values become one variable for each leaf, so
+  `{{ _.user.name }}` becomes `{{user.name}}`.
+- **Insomnia's response tag** (`{% response ... %}`), which reads a value from another
+  request's last response, becomes a "Save from response" rule on that request and a
+  variable. Unlike Insomnia, the other request is not sent for you: send it first.
+- **`{% uuid %}` and `{% now %}`** become `{{$guid}}`, `{{$isoTimestamp}}` and
+  `{{$timestamp}}`. Other template tags (faker, prompt, hash, file and so on) are left as
+  written and listed in the report.
+- **Headers and variables set on a folder**, or on a Bruno collection, are copied onto the
+  requests inside it and into the collection's variables, because only requests have
+  headers here and folders have no variables.
+- **Bruno's assertions** become checks where there is an equivalent (`eq`, `neq`, `gt`,
+  `lt`, `contains`, `notContains`, `matches`, `startsWith`, `endsWith`, `isDefined`,
+  `isUndefined`); the rest are listed in the report. Its post-response variables become
+  "Save from response" rules, or a script line when the expression is not a plain path.
+- **Bruno's runtime variables** (`bru.setVar`) are kept as collection variables with a
+  "This Mac only" value, so they last between requests as they do in Bruno.
+- **A Bruno folder imported again** updates the collection it made. The JSON export has
+  nothing to recognise it by, so importing it again makes a second collection.
+
+Not imported: cookies, client certificates, proxy settings, Insomnia's unit tests and
+mock servers, `.proto` files (a gRPC request keeps its address, method and message; load
+its methods from the server), Bruno's secret values (Bruno keeps them out of its files)
+and `{{process.env...}}` values, WebSocket messages, and auth kinds this app does not have
+(digest, NTLM, AWS, OAuth 1 and others), which are set to no auth and listed.
 
 ### API specs
 
@@ -231,7 +290,10 @@ Scripts get `pm.test`, `pm.expect` (the commonly used Chai assertions), `pm.resp
 
 Not supported yet, and reported as a script error when used: `pm.sendRequest`,
 `setNextRequest`, `require(...)` and Postman's bundled libraries such as CryptoJS, moment
-and lodash. A value a script sets is stored as a "This Mac only" value. Collection and
+and lodash. Scripts imported from Insomnia can use `insomnia` in place of `pm`. Scripts
+imported from Bruno can use `bru` (variables and `interpolate`), `req`, `res`, `test` and
+`expect`; `await`, `bru.sendRequest`, `bru.runRequest`, `bru.sleep` and `res('path')`
+queries are not supported. A value a script sets is stored as a "This Mac only" value. Collection and
 folder scripts run but cannot be edited in the app yet. A script stuck in an endless loop
 is not interrupted.
 
