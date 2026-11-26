@@ -2,7 +2,7 @@
 # Makes the download: a signed, notarised disk image of API Playground.
 # Usage: Scripts/release.sh
 #
-# Steps: run the tests, build for Apple silicon and Intel, sign with Developer ID,
+# Steps: run the tests, build for Apple silicon, sign with Developer ID,
 # notarise and staple the app, pack it into a disk image, sign, notarise and staple
 # that, and (when release.conf names a feed) add the release to the update feed.
 #
@@ -59,7 +59,7 @@ echo "== Tests"
 swift test 2>&1 | tail -3
 
 echo "== Build and sign ($IDENTITY)"
-UNIVERSAL=1 SIGN_IDENTITY="$IDENTITY" Scripts/make-app.sh release
+SIGN_IDENTITY="$IDENTITY" Scripts/make-app.sh release
 
 rm -rf "$OUT/stage"
 mkdir -p "$OUT/stage"

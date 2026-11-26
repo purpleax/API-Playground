@@ -448,6 +448,59 @@ private func query(_ expression: String) throws -> String {
     }
 }
 
+@Suite struct ProxyTests {
+    @Test func requestsGoThroughTheProxyUnlessTheHostIsBypassed() async throws {
+        // The echo server stands in for a proxy: it reports the request line it was given,
+        // which for a proxied request is the whole address.
+        let server = try EchoServer()
+        try await server.start()
+        defer { server.stop() }
+
+        var executor = RequestExecutor()
+        executor.proxy = ProxySettings(enabled: true, url: "http://127.0.0.1:\(server.port)", bypass: "direct.test, *.internal.test")
+        let options = executor.options(for: "http://upstream.test/v1/items")
+        #expect(options.proxy != nil)
+        let response = try await HTTPClient().send(PreparedRequest(method: "GET", url: "http://upstream.test/v1/items"), options: options)
+        let echo = try JSONDecoder().decode(Echo.self, from: response.body)
+        #expect(echo.path == "http://upstream.test/v1/items")
+        #expect(echo.headers["host"] == "upstream.test")
+
+        #expect(executor.options(for: "http://direct.test/x").proxy == nil)
+        #expect(executor.options(for: "http://a.internal.test/x").proxy == nil)
+        #expect(executor.options(for: "http://internal.test.example/x").proxy != nil)
+    }
+
+    @Test func theProxyPasswordComesFromTheSecretStore() async throws {
+        let server = try EchoServer()
+        try await server.start()
+        defer { server.stop() }
+        let secrets = InMemorySecretStore()
+        secrets.set("pw", for: ProxySettings.passwordKey)
+        var executor = RequestExecutor()
+        executor.secrets = secrets
+        executor.proxy = ProxySettings(enabled: true, url: "http://127.0.0.1:\(server.port)", username: "me", bypass: "")
+        let response = try await HTTPClient().send(
+            PreparedRequest(method: "GET", url: "http://upstream.test/"), options: executor.options(for: "http://upstream.test/")
+        )
+        let echo = try JSONDecoder().decode(Echo.self, from: response.body)
+        #expect(echo.headers["proxy-authorization"] == "Basic " + Data("me:pw".utf8).base64EncodedString())
+    }
+
+    @Test func aProxyThatIsOffOrBlankIsNotUsed() {
+        #expect(!ProxySettings(enabled: false, url: "http://p:1").applies(to: "http://x.test"))
+        #expect(!ProxySettings(enabled: true, url: "  ").applies(to: "http://x.test"))
+        #expect(!ProxySettings(enabled: true, url: "http://p:1").applies(to: "http://localhost:3000"))
+        #expect(!ProxySettings(enabled: true, url: "http://p:1", bypass: "*").applies(to: "http://x.test"))
+    }
+
+    @Test func thePasswordIsNeverWrittenWithTheSettings() throws {
+        var proxy = ProxySettings(enabled: true, url: "http://p:1", username: "me")
+        proxy.password = "pw"
+        let text = String(decoding: try JSONEncoder().encode(proxy), as: UTF8.self)
+        #expect(!text.contains("pw"))
+    }
+}
+
 /// Runs the Mac's own `openssl s_server` on localhost with a certificate made for the test,
 /// so the certificate chain and client certificates are checked against a real TLS server.
 @Suite(.serialized) struct TLSTests {

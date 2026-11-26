@@ -36,7 +36,8 @@ public struct GRPCTarget: Equatable, Hashable, Sendable {
         self.init(host: host, port: port, tls: tls)
     }
 
-    var baseURL: String { "\(tls ? "https" : "http")://\(host):\(port)" }
+    /// The address as libcurl is given it.
+    public var baseURL: String { "\(tls ? "https" : "http")://\(host):\(port)" }
 
     public var display: String { "\(tls ? "grpcs" : "grpc")://\(host):\(port)" }
 }
@@ -115,6 +116,10 @@ public struct GRPCClient: Sendable {
     public var http = HTTPClient()
 
     public init() {}
+
+    public init(http: HTTPClient) {
+        self.http = http
+    }
 
     public static func frame(_ message: Data) -> Data {
         var out = Data([0])

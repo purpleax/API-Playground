@@ -21,7 +21,7 @@ struct RequestQuery: EntityStringQuery {
     @MainActor
     private func all() -> [RequestEntity] {
         AppModel.shared.collections.flatMap { collection in
-            collection.allRequests.filter { !$0.isGRPC }.map {
+            collection.allRequests.map {
                 RequestEntity(id: $0.id, name: $0.name, detail: "\(collection.name)  ·  \($0.method) \($0.url)")
             }
         }

@@ -80,7 +80,7 @@ extension AppModel {
         defer { grpcLoading.remove(id) }
         let metadata = grpcMetadata(request, collectionIndex: index)
         do {
-            let schema = try await GRPCClient().reflect(target, metadata: metadata)
+            let schema = try await GRPCClient().reflect(target, metadata: metadata, options: executor.options(for: target.baseURL))
             keep(schema, for: target)
             grpcNotes[id] = GRPCNote(text: "\(target.display) described \(Self.count(schema)).")
             return schema
@@ -138,120 +138,16 @@ extension AppModel {
         update(request)
     }
 
-    // MARK: Sending
-
-    func sendGRPC(_ id: UUID) {
-        guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return }
-        if case .sending = responses[id] { return }
-        let resolver = resolver(forCollection: index)
-        let metadata = grpcMetadata(request, collectionIndex: index)
-        var text = ""
-        if case .raw(let raw, _) = request.body { text = resolver.resolve(raw).string }
-        let assertions = request.assertions.filter(\.enabled).map { ($0, resolver.resolve($0.expected).string) }
-
-        responses[id] = .sending
-        let flag = CancellationFlag()
-        cancelFlags[id] = flag
-
-        func fail(_ message: String) {
-            var result = RequestRunResult(requestID: id)
-            result.error = message
-            cancelFlags[id] = nil
-            live[id] = nil
-            record(result)
+    /// What a server offers, for the request engine: from this session, from the copy
+    /// saved earlier, or by asking the server.
+    func schema(for target: GRPCTarget, metadata: [HTTPHeader]) async throws -> ProtoSchema {
+        if let schema = grpcSchemas[target.display] { return schema }
+        if let data = try? Data(contentsOf: Self.cacheFile(for: target)), let schema = try? ProtoSchema(fileDescriptorSet: data) {
+            grpcSchemas[target.display] = schema
+            return schema
         }
-
-        Task {
-            guard let target = grpcTarget(id) else {
-                return fail("The address is not valid. Use grpc://host:port, or grpcs:// for a server with TLS.")
-            }
-            // Ask the server what it offers, if that is not known yet.
-            var schema = grpcSchema(id)
-            if schema == nil { schema = await loadGRPCSchema(id) }
-            guard let schema else {
-                return fail(grpcNotes[id]?.text ?? "The server's methods are not known yet.")
-            }
-            guard let name = request.grpcMethod, !name.isEmpty else {
-                return fail("Choose a method to call.")
-            }
-            guard let method = schema.method(name) else {
-                return fail("“\(name)” is not among the methods this server described. Load its methods again, or choose another.")
-            }
-
-            let json = ProtoJSON(schema: schema)
-            var messages: [Data] = []
-            do {
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                let root = trimmed.isEmpty ? SpecNode(.map([])) : try SpecParser.parse(trimmed).root
-                // A list sends one message per item, which is how a client stream is written.
-                if root.isList, method.clientStreaming {
-                    messages = try root.items.enumerated().map { try json.encode($0.element, as: method.inputType, path: "[\($0.offset)]") }
-                } else if root.isList {
-                    return fail("“\(method.name)” takes one message, so the message should be an object in { }, not a list.")
-                } else {
-                    messages = [try json.encode(root, as: method.inputType)]
-                }
-            } catch let error as SpecParseError {
-                return fail("The message is not valid JSON. \(error.localizedDescription)")
-            } catch {
-                return fail(error.localizedDescription)
-            }
-
-            // Show a stream's messages as they arrive, the way server-sent events are shown.
-            if method.serverStreaming {
-                live[id] = LiveStream(status: 200, headers: [HTTPHeader(name: "Content-Type", value: "text/event-stream")])
-            }
-            let outputType = method.outputType
-            var options = HTTPOptions()
-            // A stream may be meant to stay open; it is stopped with the Stop button.
-            if method.serverStreaming { options.timeout = 3600 }
-            let prepared = PreparedRequest(
-                method: "GRPC", url: "\(target.display)/\(method.id)", headers: metadata,
-                body: Data(text.utf8)
-            )
-            do {
-                let result = try await GRPCClient().call(
-                    target, method: method.id, messages: messages, metadata: metadata, options: options,
-                    onMessage: { data in
-                        let shown = (try? json.decode(data, as: outputType).jsonText(pretty: false)) ?? "\(data.count) bytes that could not be read"
-                        Task { @MainActor in
-                            AppModel.shared.live[id]?.bytes += data.count
-                            AppModel.shared.live[id]?.events.append(ServerSentEvent(event: "message", data: shown))
-                        }
-                    },
-                    cancellation: flag
-                )
-                let decoded = try result.messages.map { try json.decode($0, as: outputType) }
-                var body: String
-                var bodyType = "application/json"
-                if method.serverStreaming {
-                    body = SpecNode(.list(decoded)).jsonText()
-                } else {
-                    body = decoded.first?.jsonText() ?? ""
-                }
-                // A failed call has no message to show, so show what the server said went wrong.
-                if decoded.isEmpty, result.status != 0 {
-                    body = result.statusMessage
-                    bodyType = "text/plain"
-                }
-                let response = HTTPResponse(
-                    status: result.status,
-                    statusText: result.statusName,
-                    httpVersion: "gRPC",
-                    headers: result.headers + (body.isEmpty ? [] : [HTTPHeader(name: "Content-Type", value: bodyType)]),
-                    body: Data(body.utf8), timings: result.timings, remoteAddress: result.remoteAddress,
-                    wireLog: result.wireLog, wasCancelled: result.wasCancelled
-                )
-                var run = RequestRunResult(requestID: id)
-                run.prepared = prepared
-                run.response = response
-                run.tests = assertions.map { $0.0.evaluate(response, expected: $0.1) }
-                cancelFlags[id] = nil
-                live[id] = nil
-                record(run)
-            } catch {
-                fail(error.localizedDescription)
-            }
-        }
+        let schema = try await GRPCClient().reflect(target, metadata: metadata, options: executor.options(for: target.baseURL))
+        keep(schema, for: target)
+        return schema
     }
 }

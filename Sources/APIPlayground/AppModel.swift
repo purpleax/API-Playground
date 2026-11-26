@@ -128,6 +128,9 @@ final class AppModel {
         didSet {
             UserDefaults.standard.set(verifyTLS, forKey: "verifyTLS")
             executor.options.verifyTLS = verifyTLS
+        executor.grpcSchema = { target, metadata in
+            try await AppModel.shared.schema(for: target, metadata: metadata)
+        }
         }
     }
     /// The request whose code is on show, to copy as cURL or another language.
@@ -555,10 +558,6 @@ final class AppModel {
     func send(_ id: UUID) {
         guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return }
         if case .sending = responses[id] { return }
-        if request.isGRPC {
-            sendGRPC(id)
-            return
-        }
         let collection = collections[index]
         let initial = runState(forCollection: index)
         responses[id] = .sending

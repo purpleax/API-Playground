@@ -7,7 +7,6 @@
 # app's data or a copy of it that is already running.
 #
 # Set in the environment:
-#   UNIVERSAL=1        build for both Apple silicon and Intel (release.sh does this)
 #   SIGN_IDENTITY=…    sign with this certificate and the hardened runtime, ready for
 #                      notarisation. Without it the app is signed for this Mac only.
 set -euo pipefail
@@ -36,8 +35,8 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app ]; then
     export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
 
-ARCHS=()
-if [ "${UNIVERSAL:-}" = "1" ]; then ARCHS=(--arch arm64 --arch x86_64); fi
+# The app is for Apple silicon only. It is not built for Intel Macs.
+ARCHS=(--arch arm64)
 swift build -c "$CONFIG" --product APIPlayground ${ARCHS[@]+"${ARCHS[@]}"}
 BIN="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/APIPlayground"
 
@@ -85,7 +84,7 @@ fi
 } > "$APP/Contents/Resources/Acknowledgements.txt"
 
 # Sparkle, which installs updates. The app looks for it in its Frameworks folder.
-ditto ".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+ditto --arch arm64 ".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 EXE="$APP/Contents/MacOS/APIPlayground"
 if ! otool -l "$EXE" | grep -q "@executable_path/../Frameworks"; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXE" 2>/dev/null
@@ -132,6 +131,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>14.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
 $UPDATES

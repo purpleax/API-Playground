@@ -17,6 +17,8 @@ public struct HTTPOptions: Sendable {
     public var version = Version.automatic
     /// The certificate to present when a server asks for one (mutual TLS).
     public var clientCertificate: ClientCertificate?
+    /// The proxy to send through, already decided to apply to this request.
+    public var proxy: ProxySettings?
 
     public init(followRedirects: Bool = true, timeout: TimeInterval = 30, verifyTLS: Bool = true) {
         self.followRedirects = followRedirects
@@ -385,6 +387,16 @@ public struct HTTPClient: Sendable {
             if certificate.isPKCS12 { _ = apc_setopt_str(handle, CURLOPT_SSLCERTTYPE, "P12") }
             if let key = certificate.keyPath, !key.isEmpty { _ = apc_setopt_str(handle, CURLOPT_SSLKEY, expand(key)) }
             if let passphrase = certificate.passphrase, !passphrase.isEmpty { _ = apc_setopt_str(handle, CURLOPT_KEYPASSWD, passphrase) }
+        }
+        if let proxy = options.proxy {
+            _ = apc_setopt_str(handle, CURLOPT_PROXY, proxy.url.trimmingCharacters(in: .whitespaces))
+            if !proxy.username.isEmpty {
+                _ = apc_setopt_str(handle, CURLOPT_PROXYUSERNAME, proxy.username)
+                _ = apc_setopt_str(handle, CURLOPT_PROXYPASSWORD, proxy.password ?? "")
+            }
+        } else {
+            // Never pick a proxy up from the environment: the app's own setting is the only one.
+            _ = apc_setopt_str(handle, CURLOPT_PROXY, "")
         }
         if capAtTLS12 {
             // CURL_SSLVERSION_MAX_TLSv1_2

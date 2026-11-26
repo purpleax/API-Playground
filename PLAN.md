@@ -23,7 +23,7 @@ Importing Postman collections and environments is the most important single capa
 
 - **Command-line runner and CI use.** The app is interactive only.
 - **Cloud sync and accounts.** Git Sync covers sharing and collaboration.
-- **Other platforms.** Mac only.
+- **Other platforms.** Mac only, and Apple silicon only: there is no Intel build.
 
 ## Positioning
 
@@ -45,6 +45,7 @@ The app has its own name and visual design. It matches Insomnia's feature set, n
 | gRPC | libcurl's HTTP/2, with protobuf messages converted using the server's own description | The spike showed no helper binary is needed for reflection or dynamic messages |
 | Git | libgit2, built into the app (it replaced the `git` command in November 2026) | No dependency on a system Git install. HTTPS sign-ins come from the Keychain items Git itself uses; SSH goes through the Mac's own `ssh` |
 | Mock servers | In-process HTTP server on localhost | No separate process to manage |
+| Minimum system | macOS 14 on Apple silicon | The interface uses SwiftUI features that arrived in macOS 14 |
 | Distribution | Notarised direct download, updates through Sparkle | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
 
 ### Code structure
@@ -177,5 +178,4 @@ Every item under [Features](#features) is now built as well, the last of them in
 - **Open or closed source.** Affects pricing and how the app competes with Bruno. libcurl, vacuum and libgit2 all allow either.
 - **Pricing.** Suggested: a one-time purchase with a year of updates and a free trial. Git Sync should not sit behind a subscription.
 - **Final name.**
-- **Minimum macOS version.**
 - **The app's own file format.** YAML or JSON, and the folder layout.

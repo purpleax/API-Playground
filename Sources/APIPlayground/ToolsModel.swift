@@ -177,7 +177,7 @@ extension AppModel {
 
     /// Sends a request and waits for the result, as the Send button would, optionally in another environment.
     func sendAndWait(_ id: UUID, environmentID: UUID? = nil) async -> RequestRunResult? {
-        guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id), !request.isGRPC else { return nil }
+        guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return nil }
         let previous = activeEnvironmentID
         if let environmentID, environments.contains(where: { $0.id == environmentID }) { activeEnvironmentID = environmentID }
         defer { if activeEnvironmentID != previous { activeEnvironmentID = previous } }
@@ -205,7 +205,7 @@ extension AppModel {
         initial.cookies = cookieJar
         var state = initial
         var results: [RequestRunResult] = []
-        for request in collection.allRequests where !request.isGRPC {
+        for request in collection.allRequests {
             let result = await executor.run(request, in: collection, state: &state)
             record(result)
             results.append(result)

@@ -39,6 +39,11 @@ public struct RequestExecutor: Sendable {
     /// Client certificates to present, by host. Their passphrases are read from `secrets`.
     public var clientCertificates: [ClientCertificateRule] = []
     public var secrets: (any SecretStore)?
+    /// Sends requests through a proxy when set and enabled. Its password is read from `secrets`.
+    public var proxy: ProxySettings?
+    /// Supplies what a gRPC server offers, such as from a saved copy. When nil, or for a
+    /// server it throws for, the executor asks the server itself by reflection.
+    public var grpcSchema: (@Sendable (GRPCTarget, [HTTPHeader]) async throws -> ProtoSchema)?
 
     /// The options for a request to this address: the usual ones, plus the host's client certificate.
     public func options(for url: String) -> HTTPOptions {
@@ -49,6 +54,11 @@ public struct RequestExecutor: Sendable {
                 keyPath: rule.keyPath.isEmpty ? nil : rule.keyPath,
                 passphrase: secrets?.get(rule.passphraseKey)
             )
+        }
+        if let proxy, proxy.applies(to: url) {
+            var proxy = proxy
+            if !proxy.username.isEmpty { proxy.password = secrets?.get(ProxySettings.passwordKey) }
+            options.proxy = proxy
         }
         return options
     }
@@ -129,16 +139,16 @@ public struct RequestExecutor: Sendable {
         }
 
         // 2. Send.
+        if item.isGRPC {
+            guard let (prepared, response) = await callGRPC(request, in: collection, state: state, handlers: handlers, cancellation: cancellation, result: &result) else {
+                return result
+            }
+            finish(item, prepared: prepared, response: response, testScripts: testScripts, state: &state, result: &result)
+            return result
+        }
         var prepared: PreparedRequest
         do {
-            var auth = collection.effectiveAuth(forRequest: item.id)
-            if case .oauth2(let config) = auth {
-                let token = try await accessToken(for: config, resolver: state.resolver)
-                let prefix = config.headerPrefix.trimmingCharacters(in: .whitespaces)
-                auth = prefix.isEmpty || prefix == "Bearer"
-                    ? .bearer(token: token.accessToken)
-                    : .apiKey(key: "Authorization", value: "\(prefix) \(token.accessToken)", placement: .header)
-            }
+            let auth = try await resolvedAuth(for: item.id, in: collection, resolver: state.resolver)
             prepared = try RequestBuilder.prepare(request, auth: auth, resolver: state.resolver)
         } catch {
             result.error = error.localizedDescription
@@ -164,6 +174,26 @@ public struct RequestExecutor: Sendable {
             state.cookies.store(setCookieHeaders: setCookies, from: url)
         }
 
+        finish(item, prepared: prepared, response: response, testScripts: testScripts, state: &state, result: &result)
+        return result
+    }
+
+    /// The auth a request uses, with OAuth 2 swapped for the token it stands for.
+    func resolvedAuth(for id: UUID, in collection: APICollection, resolver: VariableResolver) async throws -> Auth {
+        let auth = collection.effectiveAuth(forRequest: id)
+        guard case .oauth2(let config) = auth else { return auth }
+        let token = try await accessToken(for: config, resolver: resolver)
+        let prefix = config.headerPrefix.trimmingCharacters(in: .whitespaces)
+        return prefix.isEmpty || prefix == "Bearer"
+            ? .bearer(token: token.accessToken)
+            : .apiKey(key: "Authorization", value: "\(prefix) \(token.accessToken)", placement: .header)
+    }
+
+    /// What follows a response of any kind: saved values, checks, then test scripts.
+    private func finish(
+        _ item: RequestItem, prepared: PreparedRequest, response: HTTPResponse, testScripts: [String],
+        state: inout RunState, result: inout RequestRunResult
+    ) {
         // 3. Extractions run first, so assertions and scripts can use the saved values.
         for extraction in item.extractions where extraction.enabled && !extraction.variable.isEmpty {
             if let value = extraction.source.value(in: response) {
@@ -196,7 +226,145 @@ public struct RequestExecutor: Sendable {
         result.logs += post.logs
         result.tests += post.tests
         result.scriptError = post.error
-        return result
+    }
+
+    // MARK: gRPC
+
+    /// Calls a gRPC method. The address is the request's URL, the message its body as JSON,
+    /// and the metadata its headers and auth. Returns nil, with `result.error` set, when the
+    /// call could not be made. A server stream is passed to `handlers` as an event stream,
+    /// one event per message.
+    private func callGRPC(
+        _ request: RequestItem, in collection: APICollection, state: RunState,
+        handlers: HTTPStreamHandlers, cancellation: CancellationFlag?, result: inout RequestRunResult
+    ) async -> (PreparedRequest, HTTPResponse)? {
+        let resolver = state.resolver
+        guard let target = GRPCTarget(resolver.resolve(request.url).string) else {
+            result.error = "The address is not valid. Use grpc://host:port, or grpcs:// for a server with TLS."
+            return nil
+        }
+        do {
+            // Metadata is the request's headers and auth, worked out the way an HTTP request's are.
+            var stand = request
+            stand.url = "http://grpc.invalid"
+            stand.method = "POST"
+            stand.body = .none
+            stand.params = []
+            let auth = try await resolvedAuth(for: request.id, in: collection, resolver: resolver)
+            let unwanted: Set<String> = ["user-agent", "accept", "accept-encoding", "content-type", "content-length", "host", "cookie"]
+            let metadata = try RequestBuilder.prepare(stand, auth: auth, resolver: resolver).headers
+                .filter { !unwanted.contains($0.name.lowercased()) }
+
+            var options = options(for: target.baseURL)
+            let client = GRPCClient(http: self.client)
+            let schema: ProtoSchema
+            if let grpcSchema {
+                schema = try await grpcSchema(target, metadata)
+            } else {
+                schema = try await client.reflect(target, metadata: metadata, options: options)
+            }
+            guard let name = request.grpcMethod, !name.isEmpty else { throw GRPCError("Choose a method to call.") }
+            guard let method = schema.method(name) else {
+                throw GRPCError("“\(name)” is not among the methods this server described. Load its methods again, or choose another.")
+            }
+
+            var text = ""
+            if case .raw(let raw, _) = request.body { text = resolver.resolve(raw).string }
+            let json = ProtoJSON(schema: schema)
+            var messages: [Data] = []
+            do {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let root = trimmed.isEmpty ? SpecNode(.map([])) : try SpecParser.parse(trimmed).root
+                // A list sends one message per item, which is how a client stream is written.
+                if root.isList, method.clientStreaming {
+                    messages = try root.items.enumerated().map { try json.encode($0.element, as: method.inputType, path: "[\($0.offset)]") }
+                } else if root.isList {
+                    throw GRPCError("“\(method.name)” takes one message, so the message should be an object in { }, not a list.")
+                } else {
+                    messages = [try json.encode(root, as: method.inputType)]
+                }
+            } catch let error as SpecParseError {
+                throw GRPCError("The message is not valid JSON. \(error.localizedDescription)")
+            }
+
+            let outputType = method.outputType
+            var onMessage: (@Sendable (Data) -> Void)?
+            if method.serverStreaming {
+                // A stream may be meant to stay open; it is stopped by cancelling.
+                options.timeout = 3600
+                handlers.onHeaders?(200, [HTTPHeader(name: "Content-Type", value: "text/event-stream")])
+                let onData = handlers.onData
+                onMessage = { data in
+                    let shown = (try? json.decode(data, as: outputType).jsonText(pretty: false)) ?? "\(data.count) bytes that could not be read"
+                    onData?(Data("event: message\ndata: \(shown)\n\n".utf8))
+                }
+            }
+            let prepared = PreparedRequest(method: "GRPC", url: "\(target.display)/\(method.id)", headers: metadata, body: Data(text.utf8))
+            result.prepared = prepared
+
+            let reply = try await client.call(
+                target, method: method.id, messages: messages, metadata: metadata, options: options,
+                onMessage: onMessage, cancellation: cancellation
+            )
+            let decoded = try reply.messages.map { try json.decode($0, as: outputType) }
+            var body = method.serverStreaming ? SpecNode(.list(decoded)).jsonText() : decoded.first?.jsonText() ?? ""
+            var bodyType = "application/json"
+            // A failed call has no message to show, so show what the server said went wrong.
+            if decoded.isEmpty, reply.status != 0 {
+                body = reply.statusMessage
+                bodyType = "text/plain"
+            }
+            let response = HTTPResponse(
+                status: reply.status, statusText: reply.statusName, httpVersion: "gRPC",
+                headers: reply.headers + (body.isEmpty ? [] : [HTTPHeader(name: "Content-Type", value: bodyType)]),
+                body: Data(body.utf8), timings: reply.timings, remoteAddress: reply.remoteAddress,
+                wireLog: reply.wireLog, wasCancelled: reply.wasCancelled
+            )
+            result.response = response
+            return (prepared, response)
+        } catch {
+            result.error = error.localizedDescription
+            return nil
+        }
+    }
+}
+
+/// A proxy to send requests through.
+public struct ProxySettings: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    /// The proxy's address, such as `http://proxy.example.com:8080` or `socks5://127.0.0.1:1080`.
+    public var url: String
+    public var username: String
+    /// Hosts to reach directly, separated by commas, such as `localhost, .internal.example.com`.
+    public var bypass: String
+    /// Filled in from the secret store when a request is sent. Never saved with the settings.
+    public var password: String?
+
+    enum CodingKeys: String, CodingKey { case enabled, url, username, bypass }
+
+    /// The name the proxy's password is kept under in the secret store.
+    public static let passwordKey = "proxy-password"
+
+    public init(enabled: Bool = false, url: String = "", username: String = "", bypass: String = "localhost, 127.0.0.1") {
+        self.enabled = enabled
+        self.url = url
+        self.username = username
+        self.bypass = bypass
+    }
+
+    var bypassList: [String] {
+        bypass.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
+    }
+
+    /// Whether a request to this address goes through the proxy.
+    public func applies(to url: String) -> Bool {
+        guard enabled, !self.url.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard let host = URLComponents(string: url)?.host?.lowercased() else { return true }
+        return !bypassList.contains { entry in
+            if entry == "*" { return true }
+            let suffix = entry.hasPrefix("*.") ? String(entry.dropFirst(1)) : entry
+            return host == suffix || host == suffix.drop(while: { $0 == "." }) || host.hasSuffix(suffix.hasPrefix(".") ? suffix : "." + suffix)
+        }
     }
 }
 

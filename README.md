@@ -408,7 +408,8 @@ open "build/API Playground.app"
 `Scripts/release.sh` makes the download, `build/release/API-Playground-VERSION.dmg`:
 
 1. Runs the tests.
-2. Builds for Apple silicon and Intel, with Sparkle and the icon inside the app.
+2. Builds for Apple silicon, with Sparkle and the icon inside the app. The app does not
+   run on Intel Macs.
 3. Signs with the Developer ID certificate in the Keychain, with the hardened runtime.
 4. Sends the app to Apple for notarisation and staples the answer to it.
 5. Packs the app and a link to Applications into a disk image, then signs, notarises and
@@ -440,8 +441,7 @@ accepted the app and the disk image, and Gatekeeper reports each as "Notarized D
 ID". 0.2.0 adds the features under "Inspecting responses" and "Tools" above.
 
 Not checked: an update has never been downloaded and installed, because there is no feed
-yet; the disk image has not been opened on another Mac; and the Intel half of the app has
-not been run.
+yet; and the disk image has not been opened on another Mac.
 
 ## Layout
 

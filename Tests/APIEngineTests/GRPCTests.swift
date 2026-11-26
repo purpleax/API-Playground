@@ -404,3 +404,102 @@ private final class Counter: @unchecked Sendable {
         return count
     }
 }
+
+/// gRPC requests run through the same executor as HTTP ones, so scripts, saved values,
+/// checks and the runner treat them alike.
+@Suite(.enabled(if: TestServer.node != nil, "Node is needed to run the test gRPC server"))
+struct GRPCThroughTheExecutor {
+    private func collection(_ request: RequestItem) -> APICollection {
+        APICollection(name: "Greeter", auth: .none, items: [.request(request)])
+    }
+
+    @Test func scriptsSavedValuesAndChecksRunAroundACall() async throws {
+        let server = try TestServer()
+        let request = RequestItem(
+            name: "Say hello", method: "GRPC", url: "{{address}}",
+            headers: [KeyValue(key: "X-Token", value: "{{token}}")],
+            body: .raw(text: #"{"name": "{{who}}", "times": 2}"#, contentType: "application/json"),
+            preRequestScript: #"pm.environment.set("who", "Ada");"#,
+            testScript: #"pm.test("greets by name", () => pm.expect(pm.response.json().message).to.eql("Hello, Ada"));"#,
+            assertions: [Assertion(source: ValueSource(kind: .status), op: .equals, expected: "0")],
+            extractions: [Extraction(variable: "greeting", source: ValueSource(kind: .json, path: "$.message"))],
+            grpcMethod: "demo.Greeter/SayHello"
+        )
+        var state = RunState(environment: [
+            Variable(key: "address", value: server.target.display), Variable(key: "token", value: "t-1"),
+        ])
+        let result = await RequestExecutor().run(request, in: collection(request), state: &state)
+        #expect(result.error == nil)
+        #expect(result.scriptError == nil)
+        #expect(result.tests.count == 2)
+        #expect(result.passed)
+        #expect(result.response?.httpVersion == "gRPC")
+        #expect(result.response?.text?.contains(#""tags": ["#) == true)
+        #expect(result.response?.text?.contains("t-1") == true)
+        #expect(result.prepared?.url == "\(server.target.display)/demo.Greeter/SayHello")
+        #expect(state.resolver.resolve("{{greeting}}").string == "Hello, Ada")
+    }
+
+    @Test func aServerStreamIsHandedOverAsEvents() async throws {
+        let server = try TestServer()
+        let request = RequestItem(
+            name: "Countdown", method: "GRPC", url: server.target.display,
+            body: .raw(text: #"{"times": 3}"#, contentType: "application/json"),
+            grpcMethod: "demo.Greeter/Countdown"
+        )
+        final class Collected: @unchecked Sendable {
+            private let lock = NSLock()
+            private var data = Data()
+            var started = false
+            func add(_ chunk: Data) { lock.lock(); data.append(chunk); lock.unlock() }
+            var events: [ServerSentEvent] { lock.lock(); defer { lock.unlock() }; return ServerSentEventParser.events(in: data) }
+        }
+        let collected = Collected()
+        var state = RunState()
+        let result = await RequestExecutor().run(
+            request, in: collection(request), state: &state,
+            handlers: HTTPStreamHandlers(onHeaders: { _, _ in collected.started = true }, onData: { collected.add($0) })
+        )
+        #expect(result.error == nil)
+        #expect(collected.started)
+        #expect(collected.events.count == 3)
+        #expect(collected.events.first?.data.contains(#""message":"3""#) == true)
+    }
+
+    @Test func mistakesComeBackAsTheReasonTheCallWasNotMade() async throws {
+        let server = try TestServer()
+        var state = RunState()
+        var request = RequestItem(name: "No method", method: "GRPC", url: server.target.display, grpcMethod: "")
+        var result = await RequestExecutor().run(request, in: collection(request), state: &state)
+        #expect(result.error == "Choose a method to call.")
+
+        request.grpcMethod = "demo.Greeter/SayHello"
+        request.body = .raw(text: "[1, 2]", contentType: nil)
+        result = await RequestExecutor().run(request, in: collection(request), state: &state)
+        #expect(result.error?.contains("takes one message") == true)
+
+        request.url = "not an address"
+        result = await RequestExecutor().run(request, in: collection(request), state: &state)
+        #expect(result.error?.contains("address is not valid") == true)
+    }
+
+    @Test func aSavedSchemaIsUsedInsteadOfAskingTheServer() async throws {
+        let server = try TestServer()
+        let schema = try await GRPCClient().reflect(server.target)
+        var executor = RequestExecutor()
+        final class Count: @unchecked Sendable { var asked = 0 }
+        let count = Count()
+        executor.grpcSchema = { _, _ in
+            count.asked += 1
+            return schema
+        }
+        let request = RequestItem(
+            name: "Say hello", method: "GRPC", url: server.target.display,
+            body: .raw(text: #"{"name": "Bo"}"#, contentType: nil), grpcMethod: "demo.Greeter/SayHello"
+        )
+        var state = RunState()
+        let result = await executor.run(request, in: collection(request), state: &state)
+        #expect(result.response?.status == 0)
+        #expect(count.asked == 1)
+    }
+}
