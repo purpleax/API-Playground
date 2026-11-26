@@ -47,6 +47,11 @@ Covered by engine tests:
 - Copying a request as cURL (read back by the cURL importer), JavaScript, Python and Swift
 - Repeat runs: sending a set number at once, stopping, percentiles and the error rate
 - Matching for the command palette
+- gRPC through the same engine as HTTP: scripts, saved values and checks around a call,
+  and a server stream handed over message by message
+- A proxy, its password, and hosts that skip it
+- A WebSocket over TLS presenting a client certificate from PEM files and from a `.p12`
+- Insomnia cookies, and Bruno certificates and proxy settings, read from exports
 
 Checked by hand in the running app:
 
@@ -86,6 +91,10 @@ Checked by hand in the running app:
 
 Not yet checked:
 
+- Everything added after 0.2.0 has been tested in the engine but not looked at in the
+  running app, apart from an Insomnia export's cookies arriving: the Proxy and
+  Certificates sheet, a request through a proxy, a gRPC request in the collection runner,
+  Compare Across Environments, and a WebSocket with a certificate
 - The Shortcuts actions in the Shortcuts app. The app bundle carries their description,
   but no shortcut has been made or run with them
 - In the command palette: the arrow keys, Return and Esc (rows were chosen by clicking),
@@ -141,15 +150,23 @@ Not yet checked:
 - **TLS.** An https response has a TLS tab with the protocol, the cipher and each
   certificate in the server's chain: who issued it, the names it covers, when it expires,
   and a button to copy it.
-- **Client certificates.** Request > TLS and Client Certificates lists which certificate to
+- **Client certificates.** Request > Proxy and Certificates lists which certificate to
   present to which host, for servers that use mutual TLS. A certificate is a PEM file with
   its key, or a `.p12` file. The list is kept on this Mac, not in the workspace, and
-  passphrases go in the Keychain. The same sheet can switch off the checking of server
-  certificates, for a local server with a self-signed one. Client certificates are used
-  for HTTP requests and OAuth 2 token requests, not yet for WebSockets or gRPC.
+  passphrases go in the Keychain. Certificates are presented on HTTP requests, OAuth 2
+  token requests, gRPC calls and WebSockets (WebSockets need macOS 15 for this).
   The Mac's own TLS library cannot finish a TLS 1.3 handshake with a client certificate
   against servers running OpenSSL 3 or later, so when that handshake fails the request is
   sent once more over TLS 1.2, and the Log tab says so.
+- **Checking certificates.** The same sheet can switch off the checking of server
+  certificates, for a local server with a self-signed one.
+- **Proxy.** The same sheet sets a proxy for every request: an `http://` or `socks5://`
+  address, a user name and password if it asks for them, and hosts to reach directly.
+  WebSockets use the proxy too, but without the user name and password. With no proxy
+  set, requests go direct; the system's proxy settings are not read.
+- **Across environments.** Request > Compare Across Environments sends a request once in
+  each of two environments and shows the two statuses and a line-by-line diff of the
+  bodies. Nothing from it is saved.
 
 ### Tools
 
@@ -273,8 +290,13 @@ Where the other app has something this one does not, the import converts it:
 - **A Bruno folder imported again** updates the collection it made. The JSON export has
   nothing to recognise it by, so importing it again makes a second collection.
 
-Not imported: cookies, client certificates, proxy settings, Insomnia's unit tests and
-mock servers, `.proto` files (a gRPC request keeps its address, method and message; load
+Settings that belong to this Mac rather than to a collection come across too, and the
+report says so: the cookies in an Insomnia cookie jar, and the client certificates and
+proxy in a Bruno collection's `bruno.json`. A proxy is taken on only when none is set
+here, because it applies to every request. Postman's exports hold none of the three.
+
+Not imported: Bruno's certificates and proxy from its YAML format or from inside a zip,
+Insomnia's unit tests and mock servers, `.proto` files (a gRPC request keeps its address, method and message; load
 its methods from the server), Bruno's secret values (Bruno keeps them out of its files)
 and `{{process.env...}}` values, WebSocket messages, and auth kinds this app does not have
 (digest, NTLM, AWS, OAuth 1 and others), which are set to no auth and listed.
@@ -342,8 +364,8 @@ Limits:
 - Compressed replies are not supported; the app asks servers not to compress.
 - `Struct`, `Value` and `Any` are shown as the plain messages they are, not in their
   special JSON forms. Timestamps, durations and the wrapper types use theirs.
-- Scripts and "Save from response" do not run for gRPC requests, and OAuth 2 is not
-  applied to them. The collection runner does not send them correctly.
+- Pre-request and test scripts, "Save from response" and OAuth 2 work as for HTTP, and
+  the collection runner and Shortcuts run gRPC requests in their place in the order.
 - Calls use libcurl's HTTP/2, which macOS includes.
 
 ### Look and feel

@@ -375,6 +375,9 @@ private final class Session {
             if node["protoFileId"]?.string?.isEmpty == false {
                 warn("gRPC requests were imported without their .proto files. Load each one's methods from its server, or from a descriptor set.")
             }
+            let scripts = scripts(node)
+            request.preRequestScript = scripts.pre
+            request.testScript = scripts.post
             return request
         }
 
