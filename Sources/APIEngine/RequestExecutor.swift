@@ -36,6 +36,22 @@ public struct RequestExecutor: Sendable {
     public var options: HTTPOptions
     /// Where OAuth 2 tokens are kept. Without it, requests that use OAuth 2 cannot run.
     public var tokens: OAuth2TokenStore?
+    /// Client certificates to present, by host. Their passphrases are read from `secrets`.
+    public var clientCertificates: [ClientCertificateRule] = []
+    public var secrets: (any SecretStore)?
+
+    /// The options for a request to this address: the usual ones, plus the host's client certificate.
+    public func options(for url: String) -> HTTPOptions {
+        var options = options
+        if let rule = clientCertificates.rule(for: url) {
+            options.clientCertificate = ClientCertificate(
+                certificatePath: rule.certificatePath,
+                keyPath: rule.keyPath.isEmpty ? nil : rule.keyPath,
+                passphrase: secrets?.get(rule.passphraseKey)
+            )
+        }
+        return options
+    }
 
     public init(client: HTTPClient = HTTPClient(), options: HTTPOptions = HTTPOptions(), tokens: OAuth2TokenStore? = nil) {
         self.client = client
@@ -51,7 +67,7 @@ public struct RequestExecutor: Sendable {
 
         if let refreshToken = stored?.refreshToken {
             let request = try OAuth2.refreshRequest(config, resolver: resolver, refreshToken: refreshToken)
-            if let response = try? await client.send(request, options: options), var fresh = try? OAuth2.parseToken(response) {
+            if let response = try? await client.send(request, options: options(for: request.url)), var fresh = try? OAuth2.parseToken(response) {
                 // A server may omit the refresh token when it has not changed.
                 fresh.refreshToken = fresh.refreshToken ?? refreshToken
                 tokens.save(fresh, for: config.id)
@@ -59,7 +75,8 @@ public struct RequestExecutor: Sendable {
             }
         }
         guard config.grant.isAutomatic else { throw OAuth2Error.needsSignIn }
-        let response = try await client.send(try OAuth2.tokenRequest(config, resolver: resolver), options: options)
+        let tokenRequest = try OAuth2.tokenRequest(config, resolver: resolver)
+        let response = try await client.send(tokenRequest, options: options(for: tokenRequest.url))
         let token = try OAuth2.parseToken(response)
         tokens.save(token, for: config.id)
         return token
@@ -136,7 +153,7 @@ public struct RequestExecutor: Sendable {
 
         let response: HTTPResponse
         do {
-            response = try await client.send(prepared, options: options, handlers: handlers, cancellation: cancellation)
+            response = try await client.send(prepared, options: options(for: prepared.url), handlers: handlers, cancellation: cancellation)
         } catch {
             result.error = error.localizedDescription
             return result
@@ -180,5 +197,55 @@ public struct RequestExecutor: Sendable {
         result.tests += post.tests
         result.scriptError = post.error
         return result
+    }
+}
+
+/// Says which client certificate to present to which host. The files stay where they are
+/// on this Mac; the rule holds their paths, and the passphrase goes in the Keychain.
+public struct ClientCertificateRule: Codable, Hashable, Identifiable, Sendable {
+    public var id: UUID
+    /// A host name, optionally with a port, such as `api.example.com` or `localhost:8443`.
+    /// A leading `*.` matches every subdomain.
+    public var host: String
+    public var certificatePath: String
+    public var keyPath: String
+    public var enabled: Bool
+
+    public init(id: UUID = UUID(), host: String = "", certificatePath: String = "", keyPath: String = "", enabled: Bool = true) {
+        self.id = id
+        self.host = host
+        self.certificatePath = certificatePath
+        self.keyPath = keyPath
+        self.enabled = enabled
+    }
+
+    /// The name the passphrase is kept under in the secret store.
+    public var passphraseKey: String { "client-certificate-\(id.uuidString)" }
+
+    public func matches(host: String, port: Int?) -> Bool {
+        var pattern = self.host.trimmingCharacters(in: .whitespaces).lowercased()
+        guard enabled, !pattern.isEmpty, !certificatePath.isEmpty else { return false }
+        // Tolerate a pasted address: drop the scheme and any path.
+        if let scheme = pattern.range(of: "://") { pattern = String(pattern[scheme.upperBound...]) }
+        if let slash = pattern.firstIndex(of: "/") { pattern = String(pattern[..<slash]) }
+        if let colon = pattern.lastIndex(of: ":"), let wanted = Int(pattern[pattern.index(after: colon)...]) {
+            guard port == wanted else { return false }
+            pattern = String(pattern[..<colon])
+        }
+        let host = host.lowercased()
+        if pattern.hasPrefix("*.") {
+            return host.hasSuffix(String(pattern.dropFirst(1)))
+        }
+        return host == pattern
+    }
+}
+
+extension Array where Element == ClientCertificateRule {
+    /// The first rule that applies to an https address.
+    public func rule(for url: String) -> ClientCertificateRule? {
+        guard let components = URLComponents(string: url), let host = components.host,
+              ["https", "wss", "grpcs"].contains(components.scheme?.lowercased() ?? "") else { return nil }
+        let port = components.port ?? 443
+        return first { $0.matches(host: host, port: port) }
     }
 }

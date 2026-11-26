@@ -254,6 +254,8 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
     /// empty until one is chosen, and nil for every other kind of request. The address is
     /// in `url`, the message in `body` as JSON, and the metadata in `headers`.
     public var grpcMethod: String?
+    /// A JSONPath or jq expression that filters the response body on screen. Nil when there is none.
+    public var responseFilter: String?
 
     public var isGRPC: Bool { grpcMethod != nil }
 
@@ -311,6 +313,7 @@ public struct RequestItem: Codable, Hashable, Identifiable, Sendable {
         assertions = try c.decodeIfPresent([Assertion].self, forKey: .assertions) ?? []
         extractions = try c.decodeIfPresent([Extraction].self, forKey: .extractions) ?? []
         grpcMethod = try c.decodeIfPresent(String.self, forKey: .grpcMethod)
+        responseFilter = try c.decodeIfPresent(String.self, forKey: .responseFilter)
     }
 }
 

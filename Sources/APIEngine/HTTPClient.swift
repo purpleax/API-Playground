@@ -15,12 +15,109 @@ public struct HTTPOptions: Sendable {
     public var timeout: TimeInterval = 30
     public var verifyTLS = true
     public var version = Version.automatic
+    /// The certificate to present when a server asks for one (mutual TLS).
+    public var clientCertificate: ClientCertificate?
 
     public init(followRedirects: Bool = true, timeout: TimeInterval = 30, verifyTLS: Bool = true) {
         self.followRedirects = followRedirects
         self.timeout = timeout
         self.verifyTLS = verifyTLS
     }
+}
+
+/// A certificate and private key that identify the caller to a server.
+public struct ClientCertificate: Equatable, Sendable {
+    /// A PEM certificate, or a PKCS#12 file (.p12 or .pfx) holding the certificate and key together.
+    public var certificatePath: String
+    /// The PEM private key, when it is not in the certificate file.
+    public var keyPath: String?
+    public var passphrase: String?
+
+    public init(certificatePath: String, keyPath: String? = nil, passphrase: String? = nil) {
+        self.certificatePath = certificatePath
+        self.keyPath = keyPath
+        self.passphrase = passphrase
+    }
+
+    var isPKCS12: Bool {
+        ["p12", "pfx"].contains((certificatePath as NSString).pathExtension.lowercased())
+    }
+}
+
+/// One certificate from the chain a server presented.
+public struct TLSCertificate: Equatable, Sendable, Identifiable {
+    public var id: Int
+    public var subject: String
+    public var issuer: String
+    public var serialNumber: String?
+    public var notBefore: Date?
+    public var notAfter: Date?
+    public var signatureAlgorithm: String?
+    public var publicKey: String?
+    /// The names the certificate is valid for, from its Subject Alternative Name.
+    public var alternativeNames: [String]
+    public var pem: String?
+
+    /// The CN part of the subject, or the whole subject when it has none.
+    public var commonName: String { Self.commonName(subject) }
+    public var issuerName: String { Self.commonName(issuer) }
+    public var isSelfSigned: Bool { subject == issuer }
+
+    static func commonName(_ name: String) -> String {
+        for part in name.split(whereSeparator: { $0 == "," || $0 == "/" }) {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            if trimmed.uppercased().hasPrefix("CN") , let equals = trimmed.firstIndex(of: "=") {
+                return trimmed[trimmed.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return name
+    }
+
+    /// Builds a certificate from libcurl's "Name:value" lines.
+    init(id: Int, fields: [(name: String, value: String)]) {
+        func field(_ name: String) -> String? {
+            fields.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
+        }
+        func date(_ text: String?) -> Date? {
+            guard let text else { return nil }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "GMT")
+            for format in ["yyyy-MM-dd HH:mm:ss 'GMT'", "MMM d HH:mm:ss yyyy 'GMT'", "MMM  d HH:mm:ss yyyy 'GMT'"] {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: text) { return date }
+            }
+            return nil
+        }
+        self.id = id
+        subject = field("Subject") ?? ""
+        issuer = field("Issuer") ?? ""
+        serialNumber = field("Serial Number")
+        notBefore = date(field("Start date"))
+        notAfter = date(field("Expire date"))
+        signatureAlgorithm = field("Signature Algorithm")
+        publicKey = [field("Public Key Algorithm"), field("RSA Public Key").map { "\($0) bits" }].compactMap { $0 }.joined(separator: ", ")
+        if publicKey?.isEmpty == true { publicKey = nil }
+        alternativeNames = (field("X509v3 Subject Alternative Name") ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.hasPrefix("DNS:") ? String($0.dropFirst(4)) : $0.replacingOccurrences(of: "IP Address:", with: "") }
+            .filter { !$0.isEmpty }
+        pem = field("Cert")
+    }
+}
+
+/// What is known about a response's TLS connection.
+public struct TLSInfo: Equatable, Sendable {
+    /// Such as "TLSv1.3".
+    public var protocolVersion: String?
+    public var cipher: String?
+    /// The server's certificate first, then the certificates that vouch for it.
+    public var certificates: [TLSCertificate] = []
+    /// False when the request was sent with certificate checking switched off.
+    public var verified = true
+    /// The client certificate file that was offered, if any.
+    public var clientCertificate: String?
 }
 
 /// How long each phase of a request took, in seconds.
@@ -65,6 +162,8 @@ public struct HTTPResponse: Equatable, Sendable {
     public var wireLog: [WireLogEntry]
     /// True when the transfer was stopped before the server finished, as with an open event stream.
     public var wasCancelled = false
+    /// The TLS connection and the server's certificates. Nil for plain HTTP.
+    public var tls: TLSInfo?
 
     public init(
         status: Int, statusText: String, httpVersion: String, headers: [HTTPHeader], body: Data,
@@ -258,6 +357,15 @@ public struct HTTPClient: Sendable {
             _ = apc_setopt_long(handle, CURLOPT_SSL_VERIFYPEER, 0)
             _ = apc_setopt_long(handle, CURLOPT_SSL_VERIFYHOST, 0)
         }
+        // Ask for the server's certificate chain, for the TLS inspector.
+        _ = apc_setopt_long(handle, CURLOPT_CERTINFO, 1)
+        if let certificate = options.clientCertificate {
+            let expand = { (path: String) in (path as NSString).expandingTildeInPath }
+            _ = apc_setopt_str(handle, CURLOPT_SSLCERT, expand(certificate.certificatePath))
+            if certificate.isPKCS12 { _ = apc_setopt_str(handle, CURLOPT_SSLCERTTYPE, "P12") }
+            if let key = certificate.keyPath, !key.isEmpty { _ = apc_setopt_str(handle, CURLOPT_SSLKEY, expand(key)) }
+            if let passphrase = certificate.passphrase, !passphrase.isEmpty { _ = apc_setopt_str(handle, CURLOPT_KEYPASSWD, passphrase) }
+        }
         if request.method == "HEAD" {
             _ = apc_setopt_long(handle, CURLOPT_NOBODY, 1)
         }
@@ -355,7 +463,11 @@ public struct HTTPClient: Sendable {
             }
             wasCancelled = true
         } else if code != CURLE_OK {
-            let message = String(cString: curl_easy_strerror(code))
+            var message = String(cString: curl_easy_strerror(code))
+            // libcurl's own words for these are vague about which side the trouble is on.
+            if options.clientCertificate != nil, code == CURLE_SSL_CERTPROBLEM {
+                message = "The client certificate could not be used. Check the certificate and key files and the passphrase."
+            }
             throw HTTPClientError(code: Int(code.rawValue), message: message)
         }
 
@@ -399,7 +511,7 @@ public struct HTTPClient: Sendable {
         default: version = "HTTP"
         }
 
-        return HTTPResponse(
+        var response = HTTPResponse(
             status: status,
             statusText: statusText,
             httpVersion: version,
@@ -410,5 +522,38 @@ public struct HTTPClient: Sendable {
             wireLog: state.log,
             wasCancelled: wasCancelled
         )
+        response.tls = tlsInfo(handle, log: state.log, options: options)
+        return response
+    }
+
+    /// Reads the certificate chain from libcurl, and the protocol and cipher from its log.
+    private static func tlsInfo(_ handle: UnsafeMutableRawPointer, log: [WireLogEntry], options: HTTPOptions) -> TLSInfo? {
+        var info = TLSInfo()
+        var pointer: UnsafeMutablePointer<curl_certinfo>?
+        if apc_getinfo_certinfo(handle, &pointer) == CURLE_OK, let chain = pointer?.pointee, let lists = chain.certinfo {
+            for index in 0..<Int(chain.num_of_certs) {
+                var fields: [(name: String, value: String)] = []
+                var node = lists[index]
+                while let current = node {
+                    let line = String(cString: current.pointee.data)
+                    if let colon = line.firstIndex(of: ":") {
+                        fields.append((String(line[..<colon]), String(line[line.index(after: colon)...])))
+                    }
+                    node = current.pointee.next
+                }
+                info.certificates.append(TLSCertificate(id: index, fields: fields))
+            }
+        }
+        // "SSL connection using TLSv1.3 / AEAD-CHACHA20-POLY1305-SHA256 / …"
+        for entry in log where entry.kind == .info {
+            guard let range = entry.text.range(of: "SSL connection using ") else { continue }
+            let parts = entry.text[range.upperBound...].split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+            info.protocolVersion = parts.first
+            info.cipher = parts.count > 1 ? parts[1] : nil
+        }
+        guard !info.certificates.isEmpty || info.protocolVersion != nil else { return nil }
+        info.verified = options.verifyTLS
+        info.clientCertificate = options.clientCertificate?.certificatePath
+        return info
     }
 }

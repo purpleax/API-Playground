@@ -25,5 +25,6 @@ CURLcode apc_setopt_progress_cb(CURL *handle, apc_progress_cb value);
 CURLcode apc_getinfo_long(CURL *handle, CURLINFO info, long *value);
 CURLcode apc_getinfo_double(CURL *handle, CURLINFO info, double *value);
 CURLcode apc_getinfo_str(CURL *handle, CURLINFO info, const char **value);
+CURLcode apc_getinfo_certinfo(CURL *handle, struct curl_certinfo **value);
 
 #endif

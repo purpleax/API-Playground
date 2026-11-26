@@ -52,3 +52,7 @@ CURLcode apc_getinfo_double(CURL *handle, CURLINFO info, double *value) {
 CURLcode apc_getinfo_str(CURL *handle, CURLINFO info, const char **value) {
     return curl_easy_getinfo(handle, info, value);
 }
+
+CURLcode apc_getinfo_certinfo(CURL *handle, struct curl_certinfo **value) {
+    return curl_easy_getinfo(handle, CURLINFO_CERTINFO, value);
+}
