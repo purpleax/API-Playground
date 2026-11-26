@@ -140,6 +140,11 @@ public enum InsomniaImporter {
                 environmentOwners.append((documents.count, workspace.name))
                 documents.append(.environment(environment, isGlobals: false, report))
             }
+            var settings = ImportedSettings(source: workspace.name)
+            for jar in workspace.children where type(jar) == "cookie_jar" {
+                settings.cookies += cookies(in: jar)
+            }
+            if !settings.isEmpty { documents.append(.settings(settings)) }
             for spec in workspace.children where type(spec) == "api_spec" {
                 if let text = spec["contents"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     documents.append(.spec(name: spec["fileName"]?.string ?? workspace.name, text: text))
@@ -162,6 +167,26 @@ public enum InsomniaImporter {
     }
 
     // MARK: Format 5
+
+    /// The cookies in an Insomnia cookie jar, which are written the way the tough-cookie library saves them.
+    static func cookies(in jar: SpecNode) -> [Cookie] {
+        (jar["cookies"]?.items ?? []).compactMap { node in
+            guard let name = node["key"]?.string, !name.isEmpty, let domain = node["domain"]?.string, !domain.isEmpty else { return nil }
+            var expires: Date?
+            if let text = node["expires"]?.string, text != "Infinity" {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                expires = formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+            }
+            return Cookie(
+                name: name, value: node["value"]?.string ?? "",
+                domain: domain.hasPrefix(".") ? String(domain.dropFirst()) : domain,
+                hostOnly: node["hostOnly"]?.bool ?? !domain.hasPrefix("."),
+                path: node["path"]?.string ?? "/", expires: expires,
+                secure: node["secure"]?.bool ?? false, httpOnly: node["httpOnly"]?.bool ?? false
+            )
+        }
+    }
 
     private static func importV5(_ root: SpecNode, type: String) -> [ImportedDocument] {
         let name = root["name"]?.string ?? "Insomnia Import"
@@ -230,6 +255,9 @@ public enum InsomniaImporter {
                 documents.append(.spec(name: name, text: text))
             }
         }
+        var settings = ImportedSettings(source: root["name"]?.string ?? "Insomnia Import")
+        if let jar = root["cookieJar"] { settings.cookies = cookies(in: jar) }
+        if !settings.isEmpty { documents.append(.settings(settings)) }
         return documents
     }
 

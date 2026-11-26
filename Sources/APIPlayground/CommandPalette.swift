@@ -55,6 +55,9 @@ extension AppModel {
                 action("Copy as Code…", "curlybraces", detail: request.name) { [weak self] in self?.showingSnippet = id }
                 action("Repeat Request…", "repeat", detail: "Send it many times and measure the response time") { [weak self] in self?.openRepeat(id) }
             }
+            if !environments.isEmpty {
+                action("Compare Across Environments…", "arrow.left.arrow.right", detail: request.name) { [weak self] in self?.openComparison(id) }
+            }
             action("Present Request", "play.rectangle", detail: request.name) { [weak self] in self?.presentSelection() }
         }
 
@@ -94,7 +97,7 @@ extension AppModel {
         }
         action("Edit Environments…", "slider.horizontal.3") { [weak self] in self?.showingEnvironments = true }
         action("Cookies…", "circle.hexagongrid") { [weak self] in self?.showingCookies = true }
-        action("TLS and Client Certificates…", "person.badge.key") { [weak self] in self?.showingClientCertificates = true }
+        action("Proxy and Certificates…", "person.badge.key") { [weak self] in self?.showingClientCertificates = true }
         action(hideSecrets ? "Show Secrets" : "Hide Secrets", hideSecrets ? "eye" : "eye.slash") { [weak self] in self?.hideSecrets.toggle() }
         action(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", "sidebar.left") { [weak self] in self?.sidebarVisible.toggle() }
 

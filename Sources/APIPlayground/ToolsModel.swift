@@ -19,7 +19,74 @@ struct RepeatSession: Identifiable {
     var stats: LatencyStats { LatencyStats(samples) }
 }
 
+/// One request sent in two environments, to see what differs.
+struct EnvironmentComparison: Identifiable {
+    let id = UUID()
+    var requestID: UUID
+    var name: String
+    /// The two environments. Nil stands for "No Environment".
+    var leftID: UUID?
+    var rightID: UUID?
+    var left: RequestRunResult?
+    var right: RequestRunResult?
+    var isRunning = false
+}
+
 extension AppModel {
+    // MARK: Comparing across environments
+
+    func openComparison(_ requestID: UUID) {
+        guard let request = request(requestID) else { return }
+        let other = environments.first { $0.id != activeEnvironmentID }?.id
+        environmentComparison = EnvironmentComparison(
+            requestID: requestID, name: request.name, leftID: activeEnvironmentID, rightID: other
+        )
+    }
+
+    func environmentName(_ id: UUID?) -> String {
+        environments.first { $0.id == id }?.name ?? "No Environment"
+    }
+
+    /// Sends the request once in each environment, at the same time. Nothing is saved from
+    /// either send: no variables, no cookies and no history.
+    func runComparison() {
+        guard var comparison = environmentComparison, !comparison.isRunning,
+              let index = collectionIndex(containingRequest: comparison.requestID),
+              let request = collections[index].request(id: comparison.requestID) else { return }
+        comparison.isRunning = true
+        comparison.left = nil
+        comparison.right = nil
+        environmentComparison = comparison
+        let collection = collections[index]
+        let executor = executor
+        func state(_ id: UUID?) -> RunState {
+            var state = RunState(
+                globals: globals, collectionVariables: collection.variables,
+                environment: environments.first { $0.id == id }?.variables ?? []
+            )
+            state.cookies = cookieJar
+            return state
+        }
+        let leftState = state(comparison.leftID)
+        let rightState = state(comparison.rightID)
+        let comparisonID = comparison.id
+        Task {
+            async let left: RequestRunResult = {
+                var state = leftState
+                return await executor.run(request, in: collection, state: &state)
+            }()
+            async let right: RequestRunResult = {
+                var state = rightState
+                return await executor.run(request, in: collection, state: &state)
+            }()
+            let results = await (left, right)
+            guard environmentComparison?.id == comparisonID else { return }
+            environmentComparison?.left = results.0
+            environmentComparison?.right = results.1
+            environmentComparison?.isRunning = false
+        }
+    }
+
     // MARK: Copying a request as code
 
     /// The request as it would be sent now, with a stored OAuth 2 token and cookies applied,
@@ -110,6 +177,78 @@ extension AppModel {
         } else {
             Self.secrets.set(passphrase, for: rule.passphraseKey)
         }
+    }
+
+    // MARK: Proxy
+
+    static func loadProxy() -> ProxySettings {
+        guard let data = UserDefaults.standard.data(forKey: "proxy") else { return ProxySettings() }
+        return (try? JSONDecoder().decode(ProxySettings.self, from: data)) ?? ProxySettings()
+    }
+
+    var proxyPassword: String {
+        Self.secrets.get(ProxySettings.passwordKey) ?? ""
+    }
+
+    func setProxyPassword(_ password: String) {
+        if password.isEmpty {
+            Self.secrets.delete(ProxySettings.passwordKey)
+        } else {
+            Self.secrets.set(password, for: ProxySettings.passwordKey)
+        }
+    }
+
+    // MARK: Settings that came with an import
+
+    /// Takes on the cookies, client certificates and proxy found in another app's export,
+    /// and returns lines for the import report.
+    func apply(_ settings: ImportedSettings) -> [String] {
+        var lines: [String] = []
+        func count(_ number: Int, _ noun: String) -> String { "\(number) \(noun)\(number == 1 ? "" : "s")" }
+
+        if !settings.cookies.isEmpty {
+            var jar = cookieJar
+            for cookie in settings.cookies {
+                jar.cookies.removeAll { $0.id == cookie.id }
+                jar.cookies.append(cookie)
+            }
+            jar.removeExpired()
+            setCookies(jar)
+            lines.append("Imported \(count(settings.cookies.count, "cookie")) from “\(settings.source)”.")
+        }
+
+        var rules = clientCertificates
+        var added: [ImportedSettings.Certificate] = []
+        for certificate in settings.certificates {
+            let rule = certificate.rule
+            if rules.contains(where: { $0.host == rule.host && $0.certificatePath == rule.certificatePath }) { continue }
+            rules.append(rule)
+            added.append(certificate)
+        }
+        if !added.isEmpty {
+            saveClientCertificates(rules)
+            for certificate in added {
+                if let passphrase = certificate.passphrase { setClientCertificatePassphrase(passphrase, for: certificate.rule) }
+            }
+            lines.append("Imported \(count(added.count, "client certificate")) from “\(settings.source)”: \(added.map(\.rule.host).joined(separator: ", ")).")
+            let missing = added.filter { !FileManager.default.fileExists(atPath: ($0.rule.certificatePath as NSString).expandingTildeInPath) }
+            if !missing.isEmpty {
+                lines.append("The certificate \(missing.count == 1 ? "file" : "files") for \(missing.map(\.rule.host).joined(separator: ", ")) could not be found. Choose \(missing.count == 1 ? "it" : "them") again in Request > Proxy and Certificates.")
+            }
+        }
+
+        if let found = settings.proxy {
+            if proxy.url.trimmingCharacters(in: .whitespaces).isEmpty {
+                var saved = found
+                saved.password = nil
+                proxy = saved
+                if let password = found.password, !password.isEmpty { setProxyPassword(password) }
+                lines.append("Set the proxy to \(found.url), from “\(settings.source)”. It now applies to every request. Change it in Request > Proxy and Certificates.")
+            } else if proxy.url != found.url {
+                lines.append("“\(settings.source)” uses the proxy \(found.url). It was not applied, because a proxy is already set here.")
+            }
+        }
+        return lines
     }
 
     // MARK: Repeat runner

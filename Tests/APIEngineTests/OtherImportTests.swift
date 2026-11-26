@@ -1143,3 +1143,103 @@ docs {
         #expect(batch.skipped.first?.hasPrefix("other.json") == true)
     }
 }
+
+private func settings(_ documents: [ImportedDocument]) -> [ImportedSettings] {
+    documents.compactMap { if case .settings(let settings) = $0 { return settings } else { return nil } }
+}
+
+@Suite struct ImportedAppSettings {
+    @Test func insomniaCookiesComeAcrossFromBothFormats() throws {
+        let v4 = """
+        {"_type": "export", "__export_format": 4, "resources": [
+          {"_id": "wrk_1", "_type": "workspace", "name": "Shop"},
+          {"_id": "req_1", "_type": "request", "parentId": "wrk_1", "name": "List", "method": "GET", "url": "https://shop.test/items"},
+          {"_id": "jar_1", "_type": "cookie_jar", "parentId": "wrk_1", "name": "Default Jar", "cookies": [
+            {"key": "session", "value": "abc", "domain": "shop.test", "path": "/", "hostOnly": true, "secure": true, "httpOnly": true, "expires": "2099-01-01T00:00:00.000Z"},
+            {"key": "theme", "value": "dark", "domain": ".shop.test", "path": "/account"},
+            {"key": "", "value": "ignored", "domain": "shop.test"}
+          ]}
+        ]}
+        """
+        let found = try #require(settings(try InsomniaImporter.importDocuments(data: Data(v4.utf8))).first)
+        #expect(found.source == "Shop")
+        #expect(found.cookies.count == 2)
+        let session = found.cookies[0]
+        #expect(session.name == "session" && session.value == "abc" && session.domain == "shop.test")
+        #expect(session.hostOnly && session.secure && session.httpOnly)
+        #expect(session.expires == ISO8601DateFormatter().date(from: "2099-01-01T00:00:00Z"))
+        let theme = found.cookies[1]
+        #expect(theme.domain == "shop.test" && !theme.hostOnly && theme.path == "/account" && theme.expires == nil)
+
+        let v5 = """
+        type: collection.insomnia.rest/5.0
+        name: Shop
+        collection:
+          - name: List
+            url: https://shop.test/items
+            method: GET
+        cookieJar:
+          name: Default Jar
+          cookies:
+            - key: session
+              value: xyz
+              domain: shop.test
+              path: /
+              expires: Infinity
+        """
+        let newer = try #require(settings(try InsomniaImporter.importDocuments(data: Data(v5.utf8))).first)
+        #expect(newer.cookies.map(\.value) == ["xyz"])
+        #expect(newer.cookies[0].expires == nil)
+    }
+
+    @Test func aBrunoFolderBringsItsCertificatesAndProxy() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("bruno-settings-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try """
+        {"version": "1", "name": "Billing", "type": "collection",
+         "clientCertificates": {"enabled": true, "certs": [
+            {"domain": "api.billing.test", "type": "cert", "certFilePath": "certs/client.pem", "keyFilePath": "/keys/client.key", "passphrase": "open"},
+            {"domain": "*.pfx.test", "type": "pfx", "pfxFilePath": "certs/bundle.p12", "passphrase": ""},
+            {"domain": "", "certFilePath": "x.pem"}
+         ]},
+         "proxy": {"enabled": true, "protocol": "http", "hostname": "proxy.corp.test", "port": 3128,
+                   "auth": {"enabled": true, "username": "me", "password": "pw"}, "bypassProxy": "localhost"}}
+        """.write(to: root.appendingPathComponent("bruno.json"), atomically: true, encoding: .utf8)
+        try "meta {\n  name: Ping\n  type: http\n  seq: 1\n}\n\nget {\n  url: https://api.billing.test/ping\n}\n"
+            .write(to: root.appendingPathComponent("Ping.bru"), atomically: true, encoding: .utf8)
+
+        let found = try #require(settings(try BrunoImporter.importFolder(at: root)).first)
+        #expect(found.source == "Billing")
+        #expect(found.certificates.count == 2)
+        let first = found.certificates[0]
+        #expect(first.rule.host == "api.billing.test")
+        #expect(first.rule.certificatePath == root.appendingPathComponent("certs/client.pem").standardizedFileURL.path)
+        #expect(first.rule.keyPath == "/keys/client.key")
+        #expect(first.passphrase == "open")
+        let second = found.certificates[1]
+        #expect(second.rule.certificatePath.hasSuffix("certs/bundle.p12") && second.rule.keyPath.isEmpty && second.passphrase == nil)
+        let proxy = try #require(found.proxy)
+        #expect(proxy.enabled && proxy.url == "http://proxy.corp.test:3128" && proxy.username == "me" && proxy.password == "pw" && proxy.bypass == "localhost")
+    }
+
+    @Test func aBrunoExportFileBringsItsProxyInTheNewerShape() throws {
+        let export = """
+        {"name": "Billing", "version": "1", "items": [],
+         "brunoConfig": {"proxy": {"inherit": false, "disabled": false,
+            "config": {"protocol": "socks5", "hostname": "127.0.0.1", "port": "1080", "auth": {"disabled": true, "username": "x"}}}}}
+        """
+        let found = try #require(settings(try BrunoImporter.importDocuments(data: Data(export.utf8))).first)
+        #expect(found.proxy?.url == "socks5://127.0.0.1:1080")
+        #expect(found.proxy?.username == "")
+        #expect(found.certificates.isEmpty)
+    }
+
+    @Test func aProxyThatIsOffOrInheritedIsLeftBehind() throws {
+        for proxy in [#"{"enabled": false, "hostname": "p.test", "port": 1}"#, #"{"enabled": "global", "hostname": "p.test"}"#,
+                      #"{"inherit": true, "config": {"hostname": "p.test"}}"#] {
+            let export = #"{"name": "A", "items": [], "brunoConfig": {"proxy": \#(proxy)}}"#
+            #expect(settings(try BrunoImporter.importDocuments(data: Data(export.utf8))).isEmpty)
+        }
+    }
+}

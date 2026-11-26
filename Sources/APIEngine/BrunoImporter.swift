@@ -477,6 +477,49 @@ public enum BrunoImporter {
         return root["name"] is String && items.allSatisfy { $0["type"] is String }
     }
 
+    /// The client certificates and proxy in a collection's `bruno.json` (or the `brunoConfig`
+    /// of a JSON export). File paths in it are relative to the collection's folder.
+    static func settings(config: [String: Any], folder: URL?, name: String) -> ImportedSettings? {
+        var settings = ImportedSettings(source: name)
+        func path(_ value: Any?) -> String {
+            guard let text = value as? String, !text.isEmpty else { return "" }
+            if text.hasPrefix("/") || text.hasPrefix("~") { return text }
+            return folder.map { $0.appendingPathComponent(text).standardizedFileURL.path } ?? text
+        }
+        let certificates = config["clientCertificates"] as? [String: Any]
+        if certificates?["enabled"] as? Bool != false {
+            for entry in certificates?["certs"] as? [[String: Any]] ?? [] {
+                guard let domain = entry["domain"] as? String, !domain.isEmpty else { continue }
+                let bundle = path(entry["pfxFilePath"])
+                let rule = ClientCertificateRule(
+                    host: domain, certificatePath: bundle.isEmpty ? path(entry["certFilePath"]) : bundle,
+                    keyPath: bundle.isEmpty ? path(entry["keyFilePath"]) : ""
+                )
+                guard !rule.certificatePath.isEmpty else { continue }
+                let passphrase = entry["passphrase"] as? String
+                settings.certificates.append(.init(rule: rule, passphrase: passphrase?.isEmpty == false ? passphrase : nil))
+            }
+        }
+        // Older files have the proxy's details beside "enabled"; newer ones put them under "config".
+        if let proxy = config["proxy"] as? [String: Any] {
+            let details = proxy["config"] as? [String: Any] ?? proxy
+            let isOn = proxy["enabled"] as? Bool == true
+                || (proxy["config"] != nil && proxy["disabled"] as? Bool != true && proxy["inherit"] as? Bool != true)
+            if isOn, let host = details["hostname"] as? String, !host.isEmpty {
+                let scheme = (details["protocol"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "http"
+                let port = (details["port"] as? NSNumber).map { ":\($0.intValue)" } ?? (details["port"] as? String).flatMap { $0.isEmpty ? nil : ":\($0)" } ?? ""
+                var found = ProxySettings(enabled: true, url: "\(scheme)://\(host)\(port)", bypass: details["bypassProxy"] as? String ?? "")
+                if let auth = details["auth"] as? [String: Any], auth["enabled"] as? Bool != false, auth["disabled"] as? Bool != true,
+                   let username = auth["username"] as? String, !username.isEmpty {
+                    found.username = username
+                    found.password = auth["password"] as? String
+                }
+                settings.proxy = found
+            }
+        }
+        return settings.isEmpty ? nil : settings
+    }
+
     // MARK: JSON export
 
     public static func importDocuments(data: Data) throws -> [ImportedDocument] {
@@ -521,6 +564,9 @@ public enum BrunoImporter {
         }
         session.finish(&collection)
         var documents: [ImportedDocument] = [.collection(collection, session.report)]
+        if let config = root["brunoConfig"] as? [String: Any], let found = Self.settings(config: config, folder: nil, name: collection.name) {
+            documents.append(.settings(found))
+        }
         for environment in root["environments"] as? [[String: Any]] ?? [] {
             let variables: [Variable] = (environment["variables"] as? [[String: Any]] ?? []).map {
                 Variable(
@@ -602,9 +648,11 @@ public enum BrunoImporter {
             name = yamlSettings?.name ?? name
             for entry in top.at(["extensions", "bruno", "ignore"])?.items ?? [] { if let text = entry.string { ignored.insert(text) } }
         }
+        var appSettings: ImportedSettings?
         if let data = try? Data(contentsOf: root.appendingPathComponent("bruno.json")),
            let config = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             if let configured = config["name"] as? String, !configured.isEmpty { name = configured }
+            appSettings = Self.settings(config: config, folder: root, name: name)
             for entry in config["ignore"] as? [String] ?? [] { ignored.insert(entry) }
         }
         let settings = yamlSettings ?? read(root.appendingPathComponent("collection.bru")).map { BrunoItem(bru: $0, fallbackName: name) } ?? BrunoItem()
@@ -669,6 +717,10 @@ public enum BrunoImporter {
         session.finish(&collection)
 
         var documents: [ImportedDocument] = [.collection(collection, session.report)]
+        if var appSettings {
+            appSettings.source = collection.name
+            documents.append(.settings(appSettings))
+        }
         let environments = ((try? fm.contentsOfDirectory(at: root.appendingPathComponent("environments"), includingPropertiesForKeys: nil)) ?? [])
             .filter { (isYAML ? ["yml", "yaml"] : ["bru"]).contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }

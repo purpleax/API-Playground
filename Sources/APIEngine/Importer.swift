@@ -102,6 +102,14 @@ public enum Importer {
                 if case .collection(var collection, let report) = document {
                     collection.postmanID = nil
                     batch.documents.append(.collection(collection, report))
+                } else if case .settings(var settings) = document {
+                    // Certificate files inside the zip are gone once it is tidied away.
+                    let before = settings.certificates.count
+                    settings.certificates.removeAll { $0.rule.certificatePath.hasPrefix(rootPath) || $0.rule.keyPath.hasPrefix(rootPath) }
+                    if settings.certificates.count < before {
+                        batch.skipped.append("client certificates in “\(settings.source)”: their files are inside the zip. Unzip it and import the folder to bring them over.")
+                    }
+                    if !settings.isEmpty { batch.documents.append(.settings(settings)) }
                 } else {
                     batch.documents.append(document)
                 }

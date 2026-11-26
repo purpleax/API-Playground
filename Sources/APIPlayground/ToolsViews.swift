@@ -60,40 +60,55 @@ struct ClientCertificatesView: View {
     @Environment(AppModel.self) private var model
     @State private var rules: [ClientCertificateRule] = []
     @State private var passphrases: [UUID: String] = [:]
+    @State private var verifyTLS = true
+    @State private var proxy = ProxySettings()
+    @State private var proxyPassword = ""
 
     var body: some View {
-        @Bindable var model = model
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("TLS and Client Certificates")
+                Text("Proxy and Certificates")
                     .font(.title3.weight(.semibold))
-                Text("Present a certificate to servers that ask for one. Each applies to requests to its host over https. The files stay where they are on this Mac, and passphrases are kept in the Keychain.")
+                Text("How requests reach servers from this Mac. These settings stay on this Mac and are not part of the workspace. Passwords and passphrases are kept in the Keychain.")
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
             Divider()
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 // The app's checkbox style draws the box alone, so the words sit beside it.
-                HStack(spacing: 8) {
-                    Toggle("Check server certificates", isOn: $model.verifyTLS)
-                        .labelsHidden()
-                        .accessibilityLabel("Check server certificates")
-                    Text("Check server certificates")
-                        .font(.system(size: 13, weight: .medium))
-                        .onTapGesture { model.verifyTLS.toggle() }
-                        .accessibilityHidden(true)
+                check("Send requests through a proxy", isOn: $proxy.enabled)
+                if proxy.enabled {
+                    field("Address", "http://proxy.example.com:8080, or socks5://127.0.0.1:1080", text: $proxy.url)
+                    HStack(spacing: 8) {
+                        field("User name", "Only if the proxy asks for one", text: $proxy.username)
+                        SecureField("Password", text: $proxyPassword)
+                            .textFieldStyle(ThemedTextFieldStyle())
+                            .frame(width: 180)
+                    }
+                    field("Skip for", "Hosts to reach directly, such as localhost, .internal.example.com", text: $proxy.bypass)
                 }
-                Text(model.verifyTLS
+            }
+            .font(.system(size: 12.5))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                check("Check server certificates", isOn: $verifyTLS)
+                Text(verifyTLS
                      ? "Requests fail when a server's certificate cannot be verified. Switch this off to reach a local server with a self-signed certificate."
                      : "Any certificate is accepted, so a connection could be to an impostor. Switch this back on when you are done with local servers.")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(model.verifyTLS ? Theme.textSecondary : Theme.warning)
+                    .foregroundStyle(verifyTLS ? Theme.textSecondary : Theme.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             Divider()
+            Text("Client certificates, for servers that ask for one")
+                .sectionTitle()
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
@@ -126,10 +141,38 @@ struct ClientCertificatesView: View {
             }
             .padding(12)
         }
-        .frame(width: 640, height: 520)
+        .frame(width: 660, height: 640)
         .onAppear {
+            verifyTLS = model.verifyTLS
+            proxy = model.proxy
+            proxyPassword = model.proxyPassword
             rules = model.clientCertificates
             passphrases = Dictionary(uniqueKeysWithValues: rules.map { ($0.id, model.clientCertificatePassphrase($0)) })
+        }
+    }
+
+    private func check(_ label: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 8) {
+            Toggle(label, isOn: isOn)
+                .labelsHidden()
+                .accessibilityLabel(label)
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .onTapGesture { isOn.wrappedValue.toggle() }
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func field(_ label: String, _ prompt: String, text: Binding<String>) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 84, alignment: .leading)
+            TextField(prompt, text: text)
+                .textFieldStyle(ThemedTextFieldStyle())
+                .font(.system(size: 12, design: .monospaced))
+                .autocorrectionDisabled()
+                .accessibilityLabel(label)
         }
     }
 
@@ -188,6 +231,9 @@ struct ClientCertificatesView: View {
     private func save() {
         // Rows left blank are dropped rather than saved.
         let kept = rules.filter { !$0.host.trimmingCharacters(in: .whitespaces).isEmpty || !$0.certificatePath.isEmpty }
+        model.verifyTLS = verifyTLS
+        model.proxy = proxy
+        model.setProxyPassword(proxy.username.isEmpty ? "" : proxyPassword)
         model.saveClientCertificates(kept)
         for rule in kept {
             model.setClientCertificatePassphrase(passphrases[rule.id] ?? "", for: rule)
@@ -406,5 +452,130 @@ struct ToastView: View {
             .padding(.bottom, 22)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityAddTraits(.isStaticText)
+    }
+}
+
+/// One request sent in two environments, with the differences between the two responses.
+struct EnvironmentCompareView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let comparison = model.environmentComparison {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Compare “\(comparison.name)” Across Environments")
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                    Text("Sends the request once in each environment and shows what differs. Nothing is added to the history and no variables are saved.")
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
+                Divider()
+
+                HStack(spacing: 10) {
+                    picker("First environment", selection: \.leftID)
+                    Image(systemName: "arrow.right").foregroundStyle(Theme.textTertiary)
+                    picker("Second environment", selection: \.rightID)
+                    Spacer()
+                    if comparison.isRunning {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button(comparison.left == nil ? "Compare" : "Compare Again") { model.runComparison() }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(comparison.isRunning || comparison.leftID == comparison.rightID)
+                        .help(comparison.leftID == comparison.rightID ? "Choose two different environments" : "Send the request in both environments")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                Divider()
+
+                if let left = comparison.left, let right = comparison.right {
+                    results(comparison, left, right)
+                } else {
+                    EmptyState(
+                        systemImage: "arrow.left.arrow.right",
+                        title: comparison.isRunning ? "Sending…" : "Ready",
+                        detail: comparison.isRunning ? "Waiting for both responses." : "Choose two environments, then press Compare."
+                    )
+                }
+
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done") { model.environmentComparison = nil }
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding(12)
+            }
+            .frame(width: 760, height: 600)
+        }
+    }
+
+    private func picker(_ label: String, selection: WritableKeyPath<EnvironmentComparison, UUID?>) -> some View {
+        Picker(label, selection: Binding(
+            get: { model.environmentComparison?[keyPath: selection] },
+            set: { model.environmentComparison?[keyPath: selection] = $0 }
+        )) {
+            Text("No Environment").tag(UUID?.none)
+            ForEach(model.environments) { environment in
+                Text(environment.name).tag(UUID?.some(environment.id))
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityLabel(label)
+    }
+
+    private func summary(_ name: String, _ result: RequestRunResult) -> some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(.system(size: 12.5, weight: .semibold))
+                .lineLimit(1)
+            if let response = result.response {
+                Chip(text: "\(response.status) \(response.statusText)".trimmingCharacters(in: .whitespaces),
+                     color: ResponseView.statusColor(response.status, grpc: response.httpVersion == "gRPC"))
+                Text(ResponseView.duration(response.timings.total))
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+            } else {
+                Text(result.error ?? "No response")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.danger)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.raised.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.smallRadius))
+    }
+
+    private static func text(_ response: HTTPResponse) -> String {
+        LineDiff.prettyJSON(response.body) ?? response.text ?? "\(response.body.count) bytes of binary data"
+    }
+
+    @ViewBuilder
+    private func results(_ comparison: EnvironmentComparison, _ left: RequestRunResult, _ right: RequestRunResult) -> some View {
+        let leftName = model.environmentName(comparison.leftID)
+        let rightName = model.environmentName(comparison.rightID)
+        HStack(spacing: 10) {
+            summary(leftName, left)
+            summary(rightName, right)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        if let a = left.response, let b = right.response {
+            let redactor = model.redactor(for: comparison.requestID)
+            let lines = LineDiff.diff(old: Self.text(a), new: Self.text(b))
+            let same = lines.allSatisfy { $0.kind == .same }
+            Text(same ? "The two bodies are identical." : "Changes in the body from \(leftName) to \(rightName):")
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+            Divider()
+            DiffView(lines: redactor.map { r in lines.map { DiffLine(kind: $0.kind, text: r.redact($0.text)) } } ?? lines)
+        } else {
+            Spacer()
+        }
     }
 }

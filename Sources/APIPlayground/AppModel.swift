@@ -122,12 +122,22 @@ final class AppModel {
         didSet { executor.clientCertificates = clientCertificates }
     }
     var showingClientCertificates = false
+    /// A proxy to send requests through. Kept on this Mac; its password is in the Keychain.
+    var proxy = AppModel.loadProxy() {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(proxy), forKey: "proxy")
+            executor.proxy = proxy
+        }
+    }
+    /// A request being compared across two environments.
+    var environmentComparison: EnvironmentComparison?
     /// Whether to refuse servers whose certificate cannot be verified. Off suits a local
     /// server with a self-signed certificate.
     var verifyTLS = UserDefaults.standard.object(forKey: "verifyTLS") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(verifyTLS, forKey: "verifyTLS")
             executor.options.verifyTLS = verifyTLS
+        executor.proxy = proxy
         executor.grpcSchema = { target, metadata in
             try await AppModel.shared.schema(for: target, metadata: metadata)
         }
@@ -716,7 +726,7 @@ final class AppModel {
         session.state = .connecting
         session.messages.append(WebSocketMessage(direction: .system, text: "Connecting to \(redactor(for: id)?.url(prepared.url) ?? prepared.url)"))
         sockets[id] = session
-        client.connect(url: url, headers: headers)
+        client.connect(url: url, headers: headers, options: WebSocketOptions(executor.options(for: prepared.url)))
     }
 
     private func handleSocket(_ event: WebSocketEvent, for id: UUID) {
@@ -1133,6 +1143,9 @@ final class AppModel {
             } catch {
                 return ["The API spec \"\(name)\" could not be saved: \(error.localizedDescription)"]
             }
+
+        case .settings(let settings):
+            return apply(settings)
 
         case .environment(var environment, let isGlobals, let report):
             if isGlobals {

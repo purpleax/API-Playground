@@ -33,6 +33,29 @@ public enum ImportedDocument: Sendable {
     case environment(APIEnvironment, isGlobals: Bool, ImportReport)
     /// An API spec that came with a collection, such as an Insomnia design document.
     case spec(name: String, text: String)
+    /// Settings that belong to the app on this Mac rather than to a collection.
+    case settings(ImportedSettings)
+}
+
+/// Cookies, client certificates and a proxy found in another app's export.
+public struct ImportedSettings: Equatable, Sendable {
+    public struct Certificate: Equatable, Sendable {
+        public var rule: ClientCertificateRule
+        public var passphrase: String?
+    }
+
+    /// What they came with, for the import report: a workspace or collection name.
+    public var source: String
+    public var cookies: [Cookie] = []
+    public var certificates: [Certificate] = []
+    /// The proxy, with its password filled in when the export had one.
+    public var proxy: ProxySettings?
+
+    public init(source: String) {
+        self.source = source
+    }
+
+    public var isEmpty: Bool { cookies.isEmpty && certificates.isEmpty && proxy == nil }
 }
 
 /// The documents found in one imported file or folder, and the entries that could not be used.

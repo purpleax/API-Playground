@@ -542,3 +542,104 @@ final class WebSocketEchoServer: @unchecked Sendable {
         }
     }
 }
+
+private let nodeForSockets = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
+
+/// A WebSocket over TLS, against a Node server that asks for a client certificate and says
+/// which one it was shown. Skipped where Node is not installed.
+@Suite(.serialized, .enabled(if: nodeForSockets != nil, "Node is needed to run the test WebSocket server"))
+struct SecureWebSockets {
+    final class SecureSocketServer {
+        let folder: URL
+        let port: Int
+        private let process = Process()
+
+        static func openssl(_ arguments: [String], in folder: URL) throws {
+            let tool = Process()
+            tool.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+            tool.arguments = arguments
+            tool.currentDirectoryURL = folder
+            tool.standardOutput = FileHandle.nullDevice
+            tool.standardError = FileHandle.nullDevice
+            try tool.run()
+            tool.waitUntilExit()
+        }
+
+        init() throws {
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("wss-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.pem", "-days", "2", "-subj", "/CN=localhost"], in: folder)
+            try Self.openssl(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "client.key", "-out", "client.pem", "-days", "2", "-subj", "/CN=socket client"], in: folder)
+            try Self.openssl(["pkcs12", "-export", "-inkey", "client.key", "-in", "client.pem", "-out", "client.p12", "-passout", "pass:secret"], in: folder)
+
+            let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Support/wss-test-server.js")
+            process.executableURL = URL(fileURLWithPath: nodeForSockets!)
+            process.arguments = [script.path, folder.appendingPathComponent("server.key").path, folder.appendingPathComponent("server.pem").path]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            var text = ""
+            while !text.contains("\n") {
+                let chunk = output.fileHandleForReading.availableData
+                if chunk.isEmpty { break }
+                text += String(decoding: chunk, as: UTF8.self)
+            }
+            port = Int(text.replacingOccurrences(of: "PORT ", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        }
+
+        func path(_ name: String) -> String { folder.appendingPathComponent(name).path }
+        var url: URL { URL(string: "wss://localhost:\(port)/")! }
+
+        deinit {
+            process.terminate()
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
+    /// Connects and returns the first thing that happens after the handshake: the server's
+    /// greeting, or the reason the connection failed.
+    private func firstWord(_ server: SecureSocketServer, _ options: WebSocketOptions) async throws -> String {
+        let events = Collector<WebSocketEvent>()
+        let client = WebSocketClient { events.add($0) }
+        client.connect(url: server.url, options: options)
+        defer { client.close() }
+        for _ in 0..<300 {
+            for event in events.all {
+                if case .message(let message) = event { return message.text }
+                if case .failed(let reason) = event { return "failed: \(reason)" }
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return "timed out"
+    }
+
+    @Test func aSelfSignedServerIsRefusedUnlessCheckingIsOff() async throws {
+        let server = try SecureSocketServer()
+        #expect(try await firstWord(server, WebSocketOptions()).hasPrefix("failed:"))
+        #expect(try await firstWord(server, WebSocketOptions(verifyTLS: false)) == "client: none")
+    }
+
+    @Test func presentsAClientCertificateFromPEMFilesOrPKCS12() async throws {
+        guard #available(macOS 15.0, *) else { return }
+        let server = try SecureSocketServer()
+        let pem = ClientCertificate(certificatePath: server.path("client.pem"), keyPath: server.path("client.key"))
+        #expect(try await firstWord(server, WebSocketOptions(verifyTLS: false, clientCertificate: pem)) == "client: socket client")
+
+        let bundle = ClientCertificate(certificatePath: server.path("client.p12"), passphrase: "secret")
+        #expect(try await firstWord(server, WebSocketOptions(verifyTLS: false, clientCertificate: bundle)) == "client: socket client")
+
+        let wrong = ClientCertificate(certificatePath: server.path("client.p12"), passphrase: "wrong")
+        #expect(try await firstWord(server, WebSocketOptions(verifyTLS: false, clientCertificate: wrong)).hasPrefix("failed:"))
+    }
+
+    @Test func aProxyAddressBecomesTheSettingsTheSystemTakes() {
+        let http = WebSocketClient.proxyDictionary(ProxySettings(enabled: true, url: "proxy.test:3128"))
+        #expect(http?["HTTPSProxy"] as? String == "proxy.test")
+        #expect(http?["HTTPSPort"] as? Int == 3128)
+        let socks = WebSocketClient.proxyDictionary(ProxySettings(enabled: true, url: "socks5://127.0.0.1"))
+        #expect(socks?["SOCKSProxy"] as? String == "127.0.0.1")
+        #expect(socks?["SOCKSPort"] as? Int == 1080)
+    }
+}

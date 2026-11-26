@@ -331,7 +331,7 @@ func importSampleEnvironment() throws -> APIEnvironment {
             switch document {
             case .collection: collections += 1
             case .environment: environments += 1
-            case .spec: break
+            case .spec, .settings: break
             }
         }
         #expect(collections == 1)

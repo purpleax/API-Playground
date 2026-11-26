@@ -95,6 +95,10 @@ struct APIPlaygroundApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(!canExportSelection)
+                Button("Compare Across Environments…") {
+                    if let id = model.selection { model.openComparison(id) }
+                }
+                .disabled(model.selection == nil || model.environments.isEmpty)
                 Divider()
                 Button("Copy as cURL") {
                     if let id = model.selection { model.copySnippet(id, language: .curl) }
@@ -108,7 +112,7 @@ struct APIPlaygroundApp: App {
                 Button("Environments…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
                 Button("Cookies…") { model.showingCookies = true }
-                Button("TLS and Client Certificates…") { model.showingClientCertificates = true }
+                Button("Proxy and Certificates…") { model.showingClientCertificates = true }
             }
             CommandGroup(after: .sidebar) {
                 Button("Command Palette…") { model.showingPalette.toggle() }
@@ -371,6 +375,16 @@ struct ContentView: View {
                     .environment(model)
                     .themedSheet()
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { model.environmentComparison != nil },
+            set: { isShown in
+                if !isShown { model.environmentComparison = nil }
+            }
+        )) {
+            EnvironmentCompareView()
+                .environment(model)
+                .themedSheet()
         }
         .sheet(isPresented: $model.showingClientCertificates) {
             ClientCertificatesView()
