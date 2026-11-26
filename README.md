@@ -367,9 +367,12 @@ The icon is a placeholder drawn by `Scripts/make-icon.swift`, which writes
 `Resources/AppIcon.icns`. The licences of Sparkle and libgit2 are copied into the app as
 `Contents/Resources/Acknowledgements.txt`.
 
-Not checked: notarisation has not been run, because the sign-in for it is not set up; an
-update has never been downloaded and installed, because there is no feed yet; and the
-Intel half of the app has not been run.
+Version 0.1.0 was released this way on 26 November 2026: Apple accepted both the app and
+the disk image, and Gatekeeper reports each as "Notarized Developer ID".
+
+Not checked: an update has never been downloaded and installed, because there is no feed
+yet; the disk image has not been opened on another Mac; and the Intel half of the app has
+not been run.
 
 ## Layout
 
