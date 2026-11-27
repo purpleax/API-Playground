@@ -94,7 +94,7 @@ Checked by hand in the running app:
   imported Insomnia collection with a gRPC request and a WebSocket; Compare Across
   Environments showing both statuses and the changed lines; a collection run with a gRPC
   request in it; and a WebSocket to a self-signed server that was shown the certificate.
-  The check found two faults in the collection runner, fixed after 0.3.0 was built: a
+  The check found two faults in the collection runner, fixed in 0.3.1: a
   gRPC call's status 0 was drawn in red, and a WebSocket request was sent as a failed GET
   where it is now skipped with a note
 
@@ -473,6 +473,10 @@ Version 0.3.0 was released the same way on 27 November 2026. It is the first bui
 Apple silicon only, which roughly halves the disk image (5.3 MB), and it adds the proxy
 setting, gRPC through the request engine, client certificates for WebSockets and gRPC,
 imported cookies and settings, and Compare Across Environments.
+
+Version 0.3.1 followed the same day with the two collection-runner fixes that the check
+of 0.3.0 found: a gRPC call's status is shown correctly, and a WebSocket request is
+skipped in a run.
 
 Not checked: an update has never been downloaded and installed, because there is no feed
 yet; and the disk image has not been opened on another Mac.
