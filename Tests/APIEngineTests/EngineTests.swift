@@ -284,3 +284,15 @@ import Testing
         #expect(LineDiff.prettyJSON(Data("{\"a \\\" : b\":\"x : y\"}".utf8)) == "{\n  \"a \\\" : b\": \"x : y\"\n}")
     }
 }
+
+@Suite struct RunningAWebSocketRequest {
+    @Test func isSkippedRatherThanSentAsHTTP() async {
+        let request = RequestItem(name: "Socket", method: "GET", url: "{{socket}}/feed")
+        let collection = APICollection(name: "Sockets", auth: .none, items: [.request(request)])
+        var state = RunState(collectionVariables: [Variable(key: "socket", value: "wss://127.0.0.1:1")])
+        let result = await RequestExecutor().run(request, in: collection, state: &state)
+        #expect(result.skipped)
+        #expect(result.skipReason?.contains("WebSockets") == true)
+        #expect(result.error == nil && result.response == nil)
+    }
+}

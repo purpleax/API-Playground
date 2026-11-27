@@ -14,6 +14,8 @@ public struct RequestRunResult: Equatable, Sendable {
     public var logs: [String] = []
     /// True when a pre-request script chose to skip the request.
     public var skipped = false
+    /// Why the request was skipped, when it was not a script that chose to.
+    public var skipReason: String?
 
     public init(requestID: UUID) {
         self.requestID = requestID
@@ -152,6 +154,12 @@ public struct RequestExecutor: Sendable {
             prepared = try RequestBuilder.prepare(request, auth: auth, resolver: state.resolver)
         } catch {
             result.error = error.localizedDescription
+            return result
+        }
+        // A WebSocket stays open until someone closes it, so it has no place in a run.
+        if WebSocketClient.isWebSocketURL(prepared.url) {
+            result.skipped = true
+            result.skipReason = "WebSockets are not opened in a run. Open the request and press Connect."
             return result
         }
         // Send stored cookies, unless the request sets its own Cookie header.

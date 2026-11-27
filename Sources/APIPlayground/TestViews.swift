@@ -154,7 +154,7 @@ struct TestResultsView: View {
                     .foregroundStyle(Theme.danger)
             }
             if result.skipped {
-                Label("A pre-request script skipped this request.", systemImage: "forward.end")
+                Label(result.skipReason ?? "A pre-request script skipped this request.", systemImage: "forward.end")
                     .foregroundStyle(Theme.textSecondary)
             }
             if result.tests.isEmpty && result.error == nil && result.scriptError == nil && !result.skipped {
@@ -214,9 +214,10 @@ struct RunnerView: View {
                             Spacer()
                             if let result = row.result {
                                 if let response = result.response {
-                                    Text("\(response.status)")
+                                    let grpc = response.httpVersion == "gRPC"
+                                    Text(grpc ? "\(response.status) \(response.statusText)" : "\(response.status)")
                                         .font(.system(.body, design: .monospaced).weight(.semibold))
-                                        .foregroundStyle(ResponseView.statusColor(response.status))
+                                        .foregroundStyle(ResponseView.statusColor(response.status, grpc: grpc))
                                     Text(ResponseView.duration(response.timings.total))
                                         .font(.system(.body, design: .monospaced))
                                         .foregroundStyle(Theme.textSecondary)
@@ -237,6 +238,12 @@ struct RunnerView: View {
                         }
                         if let result = row.result, !result.passed {
                             failures(result)
+                                .padding(.leading, 26)
+                        }
+                        if let reason = row.result?.skipReason {
+                            Text("Skipped. \(reason)")
+                                .font(.callout)
+                                .foregroundStyle(Theme.textSecondary)
                                 .padding(.leading, 26)
                         }
                     }
@@ -312,7 +319,9 @@ struct RunnerView: View {
         let passed = finished.filter { $0.passed && !$0.skipped }.count
         let tests = finished.flatMap(\.tests)
         let testsPassed = tests.filter(\.passed).count
-        var parts = ["\(finished.count) of \(session.rows.count) requests run", "\(passed) passed"]
+        let skipped = finished.filter(\.skipped).count
+        var parts = ["\(finished.count - skipped) of \(session.rows.count) requests run", "\(passed) passed"]
+        if skipped > 0 { parts.append("\(skipped) skipped") }
         if !tests.isEmpty {
             parts.append("\(testsPassed) of \(tests.count) tests passed")
         }

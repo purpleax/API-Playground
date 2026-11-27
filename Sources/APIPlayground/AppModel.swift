@@ -785,7 +785,9 @@ final class AppModel {
             title: folderName.map { "\(collection.name) / \($0)" } ?? collection.name,
             collectionID: collectionID,
             folderID: folderID,
-            rows: requests.map { RunnerRow(id: $0.id, name: $0.name, method: $0.method) }
+            rows: requests.map {
+                RunnerRow(id: $0.id, name: $0.name, method: $0.isGRPC ? "GRPC" : isWebSocket($0.id) ? "WS" : $0.method)
+            }
         )
         session.isRunning = !requests.isEmpty
         runner = session

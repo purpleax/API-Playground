@@ -88,13 +88,20 @@ Checked by hand in the running app:
   palette finding and opening a request and starting a mock; the TLS tab after a request
   that presented a client certificate; and the menu-bar item showing the mock's port,
   listing its commands and stopping the mock
+- Added in 0.3.0, against servers on this Mac: the Proxy and Certificates sheet saving a
+  proxy, the certificate-checking switch and a certificate typed in as file paths; a
+  request sent through the proxy with its user name, and local addresses skipping it; an
+  imported Insomnia collection with a gRPC request and a WebSocket; Compare Across
+  Environments showing both statuses and the changed lines; a collection run with a gRPC
+  request in it; and a WebSocket to a self-signed server that was shown the certificate.
+  The check found two faults in the collection runner, fixed after 0.3.0 was built: a
+  gRPC call's status 0 was drawn in red, and a WebSocket request was sent as a failed GET
+  where it is now skipped with a note
 
 Not yet checked:
 
-- Everything added in 0.3.0 has been tested in the engine but not looked at in the
-  running app, apart from an Insomnia export's cookies arriving: the Proxy and
-  Certificates sheet, a request through a proxy, a gRPC request in the collection runner,
-  Compare Across Environments, and a WebSocket with a certificate
+- A proxy password typed into the sheet and kept in the Keychain (the engine test covers
+  sending it), and editing the list of hosts to skip
 - The Shortcuts actions in the Shortcuts app. The app bundle carries their description,
   but no shortcut has been made or run with them
 - In the command palette: the arrow keys, Return and Esc (rows were chosen by clicking),
