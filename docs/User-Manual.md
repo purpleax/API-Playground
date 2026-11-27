@@ -53,7 +53,7 @@ newer download by hand.
 - **Response** (right): the status, size and time, with tabs for the body, headers and
   more. See [Reading a response](#8-reading-a-response).
 - **Top bar**: the name of the workspace, the environment switcher, and buttons for the
-  command palette, the theme, the environment editor, Hide Secrets and the mock server.
+  command palette, the theme, the Variables sheet, Hide Secrets and the mock server.
 
 **⌘K** opens the command palette, which finds any request or command by typing part of
 its name.
@@ -163,12 +163,19 @@ environment wins over the collection, and the collection wins over globals.
 | Collection | Values that belong to one collection, such as its base address |
 | Environment | Values that change between servers: staging, production and so on |
 
-**Request > Environments… (⌘E)** edits environments and globals. The switcher in the top
-bar chooses which environment is active; "No Environment" means none is.
+**Request > Variables… (⌘E)** edits all three in one sheet. Its list has a heading for
+each, saying when those variables are used:
 
-A collection's own variables are not an environment. They always apply to that
-collection's requests, whichever environment is chosen. To edit them, right-click the
-collection in the sidebar and choose **Variables…**.
+- **Everywhere**: the globals.
+- **Collections**: each collection's own variables. They always apply to that
+  collection's requests, whichever environment is chosen. A collection is not an
+  environment.
+- **Environments**: each environment. Only one is used at a time, the one chosen in the
+  switcher in the top bar, and it is marked "In use". "No Environment" there means none
+  is, and the globals and collection variables still apply.
+
+Right-clicking a collection in the sidebar and choosing **Variables…** opens the same
+sheet on that collection.
 
 Each variable has up to three parts:
 
@@ -499,7 +506,7 @@ Appearance**, switches to Light or Match System.
 | ⇧⌘R | Repeat Request… |
 | ⇧⌘C | Copy as cURL |
 | ⌥⌘C | Copy as Code… |
-| ⌘E | Environments… |
+| ⌘E | Variables… |
 | ⌘K | Command Palette… |
 | ⌃⌘S | Hide or show the sidebar |
 | ⇧⌘T | Theme… |

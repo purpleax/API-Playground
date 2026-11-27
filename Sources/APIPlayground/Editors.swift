@@ -333,76 +333,113 @@ struct VariableEditor: View {
     }
 }
 
-/// The sheet for editing environments and global variables.
-struct EnvironmentsView: View {
+/// The one sheet for every kind of variable: the globals, each collection's own, and each
+/// environment. They are listed from the widest to the narrowest, which is also the order
+/// in which a later one's value replaces an earlier one's.
+struct VariablesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    /// nil means the globals are selected.
-    @State private var selected: UUID?
-    @State private var draft = APIEnvironment()
+    enum Scope: Hashable {
+        case globals
+        case collection(UUID)
+        case environment(UUID)
+    }
+
+    @State private var selected = Scope.globals
     @State private var globalsDraft: [Variable] = []
+    @State private var collectionDraft: [Variable] = []
+    @State private var draft = APIEnvironment()
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Variables").font(.system(size: 17, weight: .bold))
+                Text("Write {{name}} in a request to use one. When a name is in more than one place, an environment's value wins over a collection's, and a collection's over a global.")
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
             HSplitView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        SelectableRow(isSelected: selected == nil) {
-                            selected = nil
+                        group("Everywhere", "Used by every request.")
+                        SelectableRow(isSelected: selected == .globals) {
+                            selected = .globals
                         } content: {
-                            Image(systemName: "globe").foregroundStyle(Theme.info)
-                            Text("Globals").font(.system(size: 13, weight: .medium))
+                            Image(systemName: "globe").foregroundStyle(Theme.info).frame(width: 16)
+                            Text("Globals").font(.system(size: 13))
                         }
-                        Text("Environments")
-                            .sectionTitle()
-                            .padding(.horizontal, 10)
-                            .padding(.top, 12)
-                            .padding(.bottom, 4)
-                        if model.environments.isEmpty {
-                            Text("None yet. An environment is a set of values you switch between in the top bar, such as staging and production.")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Theme.textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 10)
-                        }
-                        ForEach(model.environments) { environment in
-                            SelectableRow(isSelected: selected == environment.id) {
-                                selected = environment.id
+
+                        group("Collections", "Always used by that collection's requests.")
+                        if model.collections.isEmpty { none("No collections yet.") }
+                        ForEach(model.collections) { collection in
+                            SelectableRow(isSelected: selected == .collection(collection.id)) {
+                                selected = .collection(collection.id)
                             } content: {
-                                Circle()
-                                    .fill(model.activeEnvironmentID == environment.id ? Theme.accent : Theme.textTertiary)
-                                    .frame(width: 7, height: 7)
+                                Image(systemName: "folder").foregroundStyle(Theme.textSecondary).frame(width: 16)
+                                Text(collection.name)
+                                    .font(.system(size: 13))
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        group("Environments", "Used one at a time: the one chosen in the top bar.")
+                        if model.environments.isEmpty { none("None yet. Add one for each server, such as staging and production.") }
+                        ForEach(model.environments) { environment in
+                            SelectableRow(isSelected: selected == .environment(environment.id)) {
+                                selected = .environment(environment.id)
+                            } content: {
+                                Image(systemName: "circle.grid.2x1").foregroundStyle(Theme.textSecondary).frame(width: 16)
                                 Text(environment.name)
                                     .font(.system(size: 13))
                                     .lineLimit(1)
+                                if model.activeEnvironmentID == environment.id {
+                                    Spacer(minLength: 4)
+                                    Text("In use")
+                                        .font(.system(size: 9.5, weight: .bold))
+                                        .foregroundStyle(Theme.accent)
+                                }
                             }
                         }
                     }
                     .padding(8)
                 }
-                .frame(minWidth: 180, maxWidth: 240)
+                .frame(minWidth: 220, maxWidth: 280)
                 .background(Theme.chrome)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("A \"This Mac only\" value replaces the shared value here and is never saved to the workspace.")
-                            .font(.callout)
-                            .foregroundStyle(Theme.textSecondary)
-                        Text("A collection's own variables, such as its base address, are not here: right-click the collection in the sidebar and choose Variables….")
-                            .font(.callout)
-                            .foregroundStyle(Theme.textSecondary)
-                        if selected == nil {
+                        switch selected {
+                        case .globals:
                             Text("Globals").font(.system(size: 17, weight: .bold))
-                            Text("Available to every request. A collection or environment variable with the same name wins.")
+                            Text("Used by every request in every collection.")
                                 .foregroundStyle(Theme.textSecondary)
                             VariableEditor(variables: $globalsDraft, hidesSecrets: model.secretsHidden)
-                        } else {
+                        case .collection(let id):
+                            Text(model.collections.first { $0.id == id }?.name ?? "Collection").font(.system(size: 17, weight: .bold))
+                            Text("Used by every request in this collection, whichever environment is chosen. This is where a collection's base address belongs.")
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            VariableEditor(variables: $collectionDraft, hidesSecrets: model.secretsHidden)
+                        case .environment(let id):
                             TextField("Environment name", text: $draft.name)
                                 .textFieldStyle(ThemedTextFieldStyle())
                                 .font(.headline)
+                            Text(model.activeEnvironmentID == id
+                                 ? "In use now: it is the environment chosen in the top bar."
+                                 : "Not in use. Its values apply only while it is the environment chosen in the top bar.")
+                                .foregroundStyle(Theme.textSecondary)
                             VariableEditor(variables: $draft.variables, hidesSecrets: model.secretsHidden)
                         }
+                        Text("A \"This Mac only\" value replaces the shared value on this Mac and is never saved to the workspace.")
+                            .font(.callout)
+                            .foregroundStyle(Theme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -415,17 +452,17 @@ struct EnvironmentsView: View {
                     commit()
                     let environment = APIEnvironment()
                     model.saveEnvironment(environment)
-                    selected = environment.id
+                    selected = .environment(environment.id)
                 } label: {
                     Label("New Environment", systemImage: "plus")
                 }
-                Button("Delete", role: .destructive) {
-                    if let id = selected {
-                        selected = nil
+                Button("Delete Environment", role: .destructive) {
+                    if case .environment(let id) = selected {
+                        selected = .globals
                         model.deleteEnvironment(id)
                     }
                 }
-                .disabled(selected == nil)
+                .disabled(!isEnvironment)
                 Spacer()
                 Button("Done") {
                     commit()
@@ -436,10 +473,18 @@ struct EnvironmentsView: View {
             }
             .padding(12)
         }
-        .frame(width: 940, height: 520)
+        .frame(width: 980, height: 560)
         .onAppear {
             globalsDraft = model.globals
-            selected = model.activeEnvironmentID
+            if let id = model.variablesCollection, model.collections.contains(where: { $0.id == id }) {
+                // Asked for from a collection: start on that collection.
+                selected = .collection(id)
+            } else if let id = model.activeEnvironmentID {
+                selected = .environment(id)
+            } else {
+                selected = .globals
+            }
+            model.variablesCollection = nil
             load(selected)
         }
         .onChange(of: selected) { old, new in
@@ -448,69 +493,57 @@ struct EnvironmentsView: View {
         }
     }
 
-    private func load(_ id: UUID?) {
-        if let id, let environment = model.environments.first(where: { $0.id == id }) {
-            draft = environment
+    /// A heading in the list, with a line saying when those variables are used.
+    private func group(_ title: String, _ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).sectionTitle()
+            Text(note)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+
+    private func none(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .italic()
+            .foregroundStyle(Theme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+    }
+
+    private var isEnvironment: Bool {
+        if case .environment = selected { return true }
+        return false
+    }
+
+    private func load(_ scope: Scope) {
+        switch scope {
+        case .globals:
+            break
+        case .collection(let id):
+            collectionDraft = model.collections.first { $0.id == id }?.variables ?? []
+        case .environment(let id):
+            if let environment = model.environments.first(where: { $0.id == id }) { draft = environment }
         }
     }
 
-    /// Saves the edits for the environment that was showing.
-    private func commit(_ id: UUID?? = nil) {
-        let target = id ?? selected
-        if let target {
-            if draft.id == target, model.environments.contains(where: { $0.id == target }) {
+    /// Saves the edits for what was showing.
+    private func commit(_ scope: Scope? = nil) {
+        switch scope ?? selected {
+        case .globals:
+            model.saveGlobals(globalsDraft)
+        case .collection(let id):
+            model.saveVariables(collectionDraft, forCollection: id)
+        case .environment(let id):
+            if draft.id == id, model.environments.contains(where: { $0.id == id }) {
                 model.saveEnvironment(draft)
             }
-        } else {
-            model.saveGlobals(globalsDraft)
-        }
-    }
-}
-
-/// The sheet for editing one collection's own variables. They are not an environment:
-/// they always apply to the collection's requests, whichever environment is chosen.
-struct CollectionVariablesView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let collectionID: UUID
-
-    @State private var draft: [Variable] = []
-
-    private var name: String {
-        model.collections.first { $0.id == collectionID }?.name ?? "Collection"
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Variables for \(name)").font(.system(size: 17, weight: .bold))
-                    Text("Used by every request in this collection, such as the address they all start with. They apply whichever environment is chosen; an environment variable with the same name wins.")
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("A \"This Mac only\" value replaces the shared value here and is never saved to the workspace.")
-                        .font(.callout)
-                        .foregroundStyle(Theme.textSecondary)
-                    VariableEditor(variables: $draft, hidesSecrets: model.secretsHidden)
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Done") {
-                    model.saveVariables(draft, forCollection: collectionID)
-                    dismiss()
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(12)
-        }
-        .frame(width: 760, height: 420)
-        .onAppear {
-            draft = model.collections.first { $0.id == collectionID }?.variables ?? []
         }
     }
 }

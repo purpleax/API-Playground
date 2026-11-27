@@ -202,7 +202,7 @@ final class AppModel {
     var historyVersion = 0
     var notice: Notice?
     var showingEnvironments = false
-    /// The collection whose own variables are being edited, in a sheet of their own.
+    /// The collection the Variables sheet should open on. Nil opens it where it usually does.
     var variablesCollection: UUID?
     var runner: RunnerSession?
 
@@ -490,9 +490,10 @@ final class AppModel {
         refreshGit()
     }
 
-    /// Opens the sheet for a collection's own variables.
+    /// Opens the Variables sheet on a collection's own variables.
     func editVariables(ofCollection id: UUID) {
         variablesCollection = id
+        showingEnvironments = true
     }
 
     func saveVariables(_ variables: [Variable], forCollection id: UUID) {

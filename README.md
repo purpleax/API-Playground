@@ -120,11 +120,12 @@ Checked by hand in the running app:
   The check found two faults in the collection runner, fixed in 0.3.1: a
   gRPC call's status 0 was drawn in red, and a WebSocket request was sent as a failed GET
   where it is now skipped with a note
-- Added in 0.3.3 and 0.3.4, in the test copy, with a JSON spec whose server is `/`: Make
-  Collection saying the spec names no server, Set Address… opening the collection's
-  variables sheet, a change made in that sheet being saved, a route sent from the spec to
-  the address set on the collection, Update Collection keeping that address, and the
-  Environments sheet listing no collections
+- Added in 0.3.3 and after, in the test copy, with a JSON spec whose server is `/`: Make
+  Collection saying the spec names no server, Set Address… opening the Variables sheet on
+  the collection, a change made there being saved, a route sent from the spec to the
+  address set on the collection, and Update Collection keeping that address. In the
+  Variables sheet: Request > Variables… opening it, the globals, a collection and a new
+  environment each shown under its own heading, and an environment added and deleted
 - An update from inside the app: a copy of 0.3.3 in Applications found 0.3.4, installed
   it and reopened as 0.3.4
 
@@ -302,9 +303,11 @@ makes a usable collection from a spec that names no host, and fills in a path va
 sits inside a part of the path. It is the first version a copy already installed can
 update to.
 
-Version 0.3.4 followed the same day. It gives a collection's variables a sheet of their
+Version 0.3.4 followed the same day. It gave a collection's variables a sheet of their
 own, apart from the Environments sheet, where listing them made a collection look like an
-environment.
+environment. That hid them, so the next version puts globals, collection variables and
+environments together in one Variables sheet, each under a heading that says when it is
+used.
 
 The update feed has now been used: a copy of 0.3.3 in Applications found 0.3.4, installed
 it and reopened as 0.3.4. Not checked: an update from 0.3.2, and the disk image opened on

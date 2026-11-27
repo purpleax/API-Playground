@@ -95,7 +95,7 @@ extension AppModel {
         if activeEnvironmentID != nil {
             action("Use No Environment", "circle.dashed", kind: "Environment") { [weak self] in self?.activeEnvironmentID = nil }
         }
-        action("Edit Environments…", "slider.horizontal.3") { [weak self] in self?.showingEnvironments = true }
+        action("Edit Variables…", "slider.horizontal.3", detail: "Globals, collections and environments") { [weak self] in self?.showingEnvironments = true }
         action("Cookies…", "circle.hexagongrid") { [weak self] in self?.showingCookies = true }
         action("Proxy and Certificates…", "person.badge.key") { [weak self] in self?.showingClientCertificates = true }
         action(hideSecrets ? "Show Secrets" : "Hide Secrets", hideSecrets ? "eye" : "eye.slash") { [weak self] in self?.hideSecrets.toggle() }

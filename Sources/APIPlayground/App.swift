@@ -109,7 +109,7 @@ struct APIPlaygroundApp: App {
                     .keyboardShortcut("c", modifiers: [.command, .option])
                     .disabled(!canExportSelection)
                 Divider()
-                Button("Environments…") { model.showingEnvironments = true }
+                Button("Variables…") { model.showingEnvironments = true }
                     .keyboardShortcut("e")
                 Button("Cookies…") { model.showingCookies = true }
                 Button("Proxy and Certificates…") { model.showingClientCertificates = true }
@@ -414,21 +414,9 @@ struct ContentView: View {
                 .themedSheet()
         }
         .sheet(isPresented: $model.showingEnvironments) {
-            EnvironmentsView()
+            VariablesView()
                 .environment(model)
                 .themedSheet()
-        }
-        .sheet(isPresented: Binding(
-            get: { model.variablesCollection != nil },
-            set: { isShown in
-                if !isShown { model.variablesCollection = nil }
-            }
-        )) {
-            if let id = model.variablesCollection {
-                CollectionVariablesView(collectionID: id)
-                    .environment(model)
-                    .themedSheet()
-            }
         }
         .sheet(isPresented: Binding(
             get: { model.runner != nil },
@@ -505,7 +493,7 @@ struct TopBar: View {
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }
-            IconButton(systemImage: "slider.horizontal.3", help: "Edit environments and global variables") {
+            IconButton(systemImage: "slider.horizontal.3", help: "Variables: globals, each collection's own, and environments (⌘E)") {
                 model.showingEnvironments = true
             }
             IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,
@@ -544,7 +532,7 @@ struct TopBar: View {
                 }
             }
             Divider()
-            Button("Edit Environments…") { model.showingEnvironments = true }
+            Button("Edit Variables…") { model.showingEnvironments = true }
         } label: {
             HStack(spacing: 7) {
                 Circle()
