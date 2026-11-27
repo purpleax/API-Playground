@@ -288,6 +288,10 @@ makes a usable collection from a spec that names no host, and fills in a path va
 sits inside a part of the path. It is the first version a copy already installed can
 update to.
 
+Version 0.3.4 followed the same day. It gives a collection's variables a sheet of their
+own, apart from the Environments sheet, where listing them made a collection look like an
+environment.
+
 Not checked: an update has never been downloaded and installed, which 0.3.3 is the first
 chance to try from an installed 0.3.2; and the disk image has not been opened on another
 Mac.
