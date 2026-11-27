@@ -158,10 +158,12 @@ environment wins over the collection, and the collection wins over globals.
 | Collection | Values that belong to one collection, such as its base address |
 | Environment | Values that change between servers: staging, production and so on |
 
-**Request > Environments… (⌘E)** edits all three: globals, each environment, and each
-collection's own variables, listed under Collections. Right-clicking a collection and
-choosing **Variables…** opens it on that collection. The switcher in the top bar chooses
-which environment is active.
+**Request > Environments… (⌘E)** edits environments and globals. The switcher in the top
+bar chooses which environment is active; "No Environment" means none is.
+
+A collection's own variables are not an environment. They always apply to that
+collection's requests, whichever environment is chosen. To edit them, right-click the
+collection in the sidebar and choose **Variables…**.
 
 Each variable has up to three parts:
 

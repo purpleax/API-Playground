@@ -419,6 +419,18 @@ struct ContentView: View {
                 .themedSheet()
         }
         .sheet(isPresented: Binding(
+            get: { model.variablesCollection != nil },
+            set: { isShown in
+                if !isShown { model.variablesCollection = nil }
+            }
+        )) {
+            if let id = model.variablesCollection {
+                CollectionVariablesView(collectionID: id)
+                    .environment(model)
+                    .themedSheet()
+            }
+        }
+        .sheet(isPresented: Binding(
             get: { model.runner != nil },
             set: { isShown in
                 if !isShown { model.closeRunner() }
@@ -493,7 +505,7 @@ struct TopBar: View {
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }
-            IconButton(systemImage: "slider.horizontal.3", help: "Edit variables: globals, environments and each collection's own") {
+            IconButton(systemImage: "slider.horizontal.3", help: "Edit environments and global variables") {
                 model.showingEnvironments = true
             }
             IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,
