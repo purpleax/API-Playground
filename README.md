@@ -283,9 +283,14 @@ Version 0.3.2, also on 27 November 2026, is the first with an update feed and th
 published on GitHub. Versions before it never check for updates and have to be replaced
 by hand.
 
-Not checked: an update has never been downloaded and installed, because that needs a
-version newer than 0.3.2 to be published; and the disk image has not been opened on
-another Mac.
+Version 0.3.3, also on 27 November 2026, adds an editor for a collection's own variables,
+makes a usable collection from a spec that names no host, and fills in a path value that
+sits inside a part of the path. It is the first version a copy already installed can
+update to.
+
+Not checked: an update has never been downloaded and installed, which 0.3.3 is the first
+chance to try from an installed 0.3.2; and the disk image has not been opened on another
+Mac.
 
 ## Layout
 
