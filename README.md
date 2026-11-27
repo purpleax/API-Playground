@@ -5,6 +5,21 @@ A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](
 Download the newest version from [Releases](https://github.com/purpleax/API-Playground/releases/latest).
 It needs macOS 14 or later on Apple silicon, and from 0.3.2 it updates itself.
 
+**[User manual](docs/User-Manual.md)**: installing, importing from Postman, Insomnia and
+Bruno, and how to use every feature.
+
+## What it does
+
+- **Manage.** Collections, folders and environments kept as plain files on your Mac, with
+  no account. Imports from Postman, Insomnia, Bruno, OpenAPI and cURL.
+- **Run.** HTTP, GraphQL, gRPC, WebSockets and event streams, with timings, a wire log,
+  response history and diffs, a JSONPath and jq filter, and a TLS inspector.
+- **Test.** Checks without code, Postman-compatible scripts, values passed from one
+  request to the next, a collection runner and a repeat runner with latency percentiles.
+- **Demo.** Presentation mode, hidden secrets, pinned responses, demo sequences and a
+  mock server, so a demo runs with no network.
+- **Share.** Git Sync with a merge that works on values, not lines of text.
+
 API Playground is free software under the [GNU General Public License, version 3](LICENSE).
 
 ## Status
@@ -148,269 +163,41 @@ Not yet checked:
 - In phase 3: the P key while presenting (its button was checked), removing a pinned
   response, reordering demo steps, and the mock's list of requests received
 
-### Inspecting responses
+## Notes on how it is built
 
-- **Filter.** Above a JSON body is a filter field. An expression that starts with `$` is
-  JSONPath (`$.items[?(@.price > 10)].name`); anything else is read as jq
-  (`.items[] | select(.price > 10) | .name`). The filter is saved with the request. The jq
-  side covers paths, `[]`, slices, pipes, `select`, `map`, `length` and `keys`, not the
-  whole language.
-- **Rate limits and tokens.** When a response carries rate-limit headers, the Headers tab
-  shows the remaining quota as a gauge with the time it refills. JSON Web Tokens found in
-  the request's headers, the response's headers or its body are listed there and can be
-  opened to read their claims and expiry. Signatures are not checked.
-- **TLS.** An https response has a TLS tab with the protocol, the cipher and each
-  certificate in the server's chain: who issued it, the names it covers, when it expires,
-  and a button to copy it.
-- **Client certificates.** Request > Proxy and Certificates lists which certificate to
-  present to which host, for servers that use mutual TLS. A certificate is a PEM file with
-  its key, or a `.p12` file. The list is kept on this Mac, not in the workspace, and
-  passphrases go in the Keychain. Certificates are presented on HTTP requests, OAuth 2
-  token requests, gRPC calls and WebSockets (WebSockets need macOS 15 for this).
-  The Mac's own TLS library cannot finish a TLS 1.3 handshake with a client certificate
-  against servers running OpenSSL 3 or later, so when that handshake fails the request is
-  sent once more over TLS 1.2, and the Log tab says so.
-- **Checking certificates.** The same sheet can switch off the checking of server
-  certificates, for a local server with a self-signed one.
-- **Proxy.** The same sheet sets a proxy for every request: an `http://` or `socks5://`
-  address, a user name and password if it asks for them, and hosts to reach directly.
-  WebSockets use the proxy too, but without the user name and password. With no proxy
-  set, requests go direct; the system's proxy settings are not read.
-- **Across environments.** Request > Compare Across Environments sends a request once in
-  each of two environments and shows the two statuses and a line-by-line diff of the
-  bodies. Nothing from it is saved.
+How to use each feature, and each feature's limits, are in the
+[user manual](docs/User-Manual.md). These notes are for people working on the code.
 
-### Tools
-
-- **Copy as code.** The braces button beside a request's name, or Request > Copy as
-  Code, shows the request as cURL, JavaScript, Python or Swift with variables filled in.
-  Request > Copy as cURL (⇧⌘C) copies straight away. While Hide Secrets is on, secrets
-  are masked in the copy.
-- **Repeat.** The repeat button, or Request > Repeat Request (⇧⌘R), sends one request a
-  chosen number of times, several at once if wanted, and reports the median, 90%, 95% and
-  99% response times, a histogram, and the error rate. A send counts as an error when it
-  gets no response, a 4xx or 5xx status, or a failed test. Nothing from a repeat run is
-  added to the history or saved to variables.
-- **Command palette.** ⌘K opens a search over every request and command: go to a
-  request, send, run a collection, switch environment, start a mock, change theme.
-- **Menu bar.** An item in the menu bar starts and stops the mock server and copies its
-  address. While a mock is running, closing the window leaves the app running so the
-  mock stays up. View > Show Mock Servers in Menu Bar turns the item off.
-- **Shortcuts.** The Shortcuts app gets five actions: Send Request, Run Collection, Start
-  Mock Server, Stop Mock Server and Set Environment. They act on the workspace that is
-  open in the app.
-
-### Demo features
-
-- **Hide Secrets** (Demo menu, or the eye in the toolbar) masks tokens, keys and passwords
-  wherever they are displayed. Requests still send the real values. It is always on while presenting.
-- **Pin** a response to keep it with the request. A pinned response can be shown in place of
-  a live one, and is what the mock server serves.
-- **Mock Server** answers on `127.0.0.1` only. When a collection's URLs start with a shared
-  variable such as `{{baseUrl}}`, starting the mock points that variable at it through a
-  temporary environment, which is removed when the mock stops.
-- **Demo sequences** list requests in order with a note each. **Present** shows one step at a
-  time in large type: Space sends, the arrow keys move, P shows the pinned response, Esc exits.
-
-### Protocols
-
-- **Event streams.** A `text/event-stream` response shows its events as they arrive. Stop
-  ends it and keeps what was received. The 30-second timeout does not apply to event streams.
-- **Cookies.** Cookies a server sets are kept on this Mac, per workspace, and sent back on
-  later requests to the same site, unless the request has a Cookie header of its own.
-  Request > Cookies lists and removes them. Cookies set on a redirect that is followed are not kept.
-- **GraphQL.** With a GraphQL body, Schema asks the server to describe itself and opens a
-  browser of its types and fields. There is no query autocomplete yet.
-- **OAuth 2.** Choose it in a request's Auth tab. Client credentials and password tokens are
-  fetched automatically when a request is sent; authorization code opens a sign-in window
-  and returns to `apiplayground://oauth/callback`. Tokens are kept in the Keychain and
-  refreshed when they expire.
-- **WebSockets.** A request whose address starts with `ws://` or `wss://` gets a
-  conversation pane in place of the response, with Connect in place of Send. The message
-  being composed is saved with the request. WebSocket traffic has no timing or wire log.
-
-### Git Sync
-
-A Local Vault folder that is a Git repository gets a branch chip in the top bar and a Git
-menu. Git > Clone a Repository copies a shared workspace onto this Mac; Git > Start Tracking
-turns the open vault into a repository.
-
-- **Changes** lists what is uncommitted by its name in the app ("Request: List pets"), with
-  a diff against the last commit, Discard, and a commit box.
-- **Pull** merges by value, not by line of text. Two people changing different fields of
-  one request, or adding different headers, never collide. Only a value both changed in
-  different ways is a conflict, and the merge view then shows mine and theirs side by side
-  for each one, with the value before. Abandon Merge puts everything back.
-- **Branches** can be created, switched and merged into the current one. Branches that
-  exist only on the remote are listed too.
-- Secret values, current values, cookies, history and OAuth tokens are never committed:
-  they live in the Keychain or the app's private data, outside the workspace.
-
-Git Sync uses libgit2, built into the app, so Git does not need to be installed on the Mac.
-All of it is in `Sources/APIEngine/Git.swift`. Signing in to a remote:
-
-- **https:// addresses** use the sign-in Git itself keeps in the Keychain for that server,
-  if there is one. Otherwise, or if the remote turns it down, the app asks for a user name
-  and a personal access token, saves them in the Keychain the same way Git does, and tries
-  again.
-- **git@ (SSH) addresses** run the Mac's own `ssh`, so they use the keys in your SSH agent
-  or Keychain. A key that needs its passphrase typed, or a server whose host key has never
-  been accepted, fails with a message instead of asking.
-
-Not checked against a real host yet: both kinds of sign-in were only read through, because
-the tests and the on-screen check used a remote in a local folder.
-
-Limits: no stash, rebase, tags or amend; a merge needs a clean workspace first; a vault
-inside a larger repository is not synced; and committing is refused while the mock server
-runs, because it keeps a temporary environment in the workspace.
-
-### Importing from Postman, Insomnia and Bruno
-
-File > Import (⌘O) takes any of these, and works out which app each came from. Dropping
-them on the app's icon does the same.
-
-| From | What to choose |
-| --- | --- |
-| Postman | A collection or environment file, a backup file, or the zip from "Export Data" |
-| Insomnia | An export file, JSON or YAML (format 4), or a collection's YAML file (format 5) |
-| Bruno | The collection's folder, one `.bru` file, or the JSON from "Export collection" |
-
-A zip can hold any mix of them. The report afterwards lists what came across and what
-needs attention. All of it is in `Sources/APIEngine`: `Importer.swift` chooses, and
-`PostmanImporter.swift`, `InsomniaImporter.swift` and `BrunoImporter.swift` read.
-
-Where the other app has something this one does not, the import converts it:
-
-- **Insomnia's base environment** becomes the collection's variables, and each
-  sub-environment an environment. Nested values become one variable for each leaf, so
-  `{{ _.user.name }}` becomes `{{user.name}}`.
-- **Insomnia's response tag** (`{% response ... %}`), which reads a value from another
-  request's last response, becomes a "Save from response" rule on that request and a
-  variable. Unlike Insomnia, the other request is not sent for you: send it first.
-- **`{% uuid %}` and `{% now %}`** become `{{$guid}}`, `{{$isoTimestamp}}` and
-  `{{$timestamp}}`. Other template tags (faker, prompt, hash, file and so on) are left as
-  written and listed in the report.
-- **Headers and variables set on a folder**, or on a Bruno collection, are copied onto the
-  requests inside it and into the collection's variables, because only requests have
-  headers here and folders have no variables.
-- **Bruno's assertions** become checks where there is an equivalent (`eq`, `neq`, `gt`,
-  `lt`, `contains`, `notContains`, `matches`, `startsWith`, `endsWith`, `isDefined`,
-  `isUndefined`); the rest are listed in the report. Its post-response variables become
-  "Save from response" rules, or a script line when the expression is not a plain path.
-- **Bruno's runtime variables** (`bru.setVar`) are kept as collection variables with a
-  "This Mac only" value, so they last between requests as they do in Bruno.
-- **A Bruno folder imported again** updates the collection it made. The JSON export has
-  nothing to recognise it by, so importing it again makes a second collection.
-
-Settings that belong to this Mac rather than to a collection come across too, and the
-report says so: the cookies in an Insomnia cookie jar, and the client certificates and
-proxy in a Bruno collection's `bruno.json`. A proxy is taken on only when none is set
-here, because it applies to every request. Postman's exports hold none of the three.
-
-Not imported: Bruno's certificates and proxy from its YAML format or from inside a zip,
-Insomnia's unit tests and mock servers, `.proto` files (a gRPC request keeps its address, method and message; load
-its methods from the server), Bruno's secret values (Bruno keeps them out of its files)
-and `{{process.env...}}` values, WebSocket messages, and auth kinds this app does not have
-(digest, NTLM, AWS, OAuth 1 and others), which are set to no auth and listed.
-
-### API specs
-
-A workspace can hold OpenAPI 3.0, 3.1 and Swagger 2.0 specs, in YAML or JSON, in its `specs`
-folder. They are kept exactly as written, so they read well in Git. File > New API Spec
-starts one; File > Import OpenAPI Spec copies one in.
-
-A spec opens with its text on the left and its routes on the right. The routes update as
-you type. Each route has a send button, which sends it to one of the spec's servers (or to
-the mock, while one runs) with example values filled in. Clicking a route or a problem
-jumps to its line.
-
-- **Make Collection** makes a request for each route, grouped into a folder per tag, with
-  `{{baseUrl}}` set to the spec's first server, example parameters and bodies, each
-  documented response saved as an example, and a check on the success status. Pressing it
-  again updates the same collection; requests keep their ids and history. Edits made to
-  the generated requests are replaced.
-- **Mock Server** makes the collection and serves its documented responses.
-- **Example values** come from the spec's `example`, `examples` and `default`, and
-  otherwise are made up from the schema.
-
-Problems come from a linter built into the app. Its rules follow Spectral's `spectral:oas`
-ruleset and use the same names. File > Lint Rules edits the workspace's ruleset
-(`specs/.spectral.yaml`, in Spectral's format), which can switch rules off, change their
-severity, and add rules of its own.
-
-Limits:
-
-- The linter is not Spectral or vacuum. It has 27 of the `spectral:oas` rules; it does not
-  check examples against their schemas or the document against the full OpenAPI schema.
-- Custom rules can use these functions: truthy, falsy, defined, undefined, pattern, casing,
-  length, enumeration, alphabetical and xor. Paths can use names, `[*]`, `..` and a final
-  `~`; filters (`[?(…)]`) are not supported. A rule that needs something else is skipped,
-  and says so in the problems list.
-- A ruleset can extend `spectral:oas` only, not a file or a URL.
-- A `$ref` to another file is not followed.
-- The YAML reader covers what specs use. It does not support tags that change a value's
-  type, complex (`?`) keys, or more than one document in a file.
-- There is no word completion or schema-aware help in the editor.
-
-### gRPC
-
-File > New gRPC Request makes a request with a server address (`grpc://host:port`, or
-`grpcs://` for TLS), a method, a message written as JSON, and metadata.
-
-- **Load Methods** asks the server to describe its services (server reflection). The
-  description is remembered for that address, so it is still there offline.
-- **A descriptor set file** can be loaded for a server without reflection. Make one with
-  `protoc --include_imports --descriptor_set_out=FILE` or `buf build -o FILE`.
-- Choosing a method fills in an example message with every field.
-- The reply is shown as JSON, with the gRPC status in place of the HTTP status. Checks,
-  history and pinned responses work as for HTTP; a check on "Status" compares the gRPC
-  status code, where 0 is OK.
-- A server stream's messages are listed as they arrive, and the finished reply is a JSON
-  list of them. For a client stream, write a JSON list to send several messages.
-
-Limits:
-
-- Every request message is sent before any reply is read. A two-way stream cannot react
-  to replies as they come.
-- A `.proto` file cannot be read directly; it must be compiled to a descriptor set.
-- Compressed replies are not supported; the app asks servers not to compress.
-- `Struct`, `Value` and `Any` are shown as the plain messages they are, not in their
-  special JSON forms. Timestamps, durations and the wrapper types use theirs.
-- Pre-request and test scripts, "Save from response" and OAuth 2 work as for HTTP, and
-  the collection runner and Shortcuts run gRPC requests in their place in the order.
-- Calls use libcurl's HTTP/2, which macOS includes.
-
-### Look and feel
-
-The interface is custom rather than standard macOS controls: a top bar in place of the
-toolbar, floating panels, colour-coded methods and status, underline tabs and
-syntax-coloured JSON. Every colour and shared control lives in
-`Sources/APIPlayground/Theme.swift`.
-
-There are eight colour themes: Aurora, Sunset, Ultraviolet, Ocean, Forest, Gold, Neon and
-Graphite. Choose one from the palette button in the top bar or View > Colour Theme. Each
-sets the accent gradient and tints the dark background. The app is dark by default; the
-same picker, or View > Appearance, switches to Light or Match System. To add a theme, add a
-`Palette` in `Theme.swift` and list it in `Palette.all`.
-
-### Script support
-
-Scripts get `pm.test`, `pm.expect` (the commonly used Chai assertions), `pm.response`,
-`pm.request`, `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`,
-`console`, `btoa`/`atob`, and the older `tests[...]`, `responseBody` and `postman.*` API.
-
-Not supported yet, and reported as a script error when used: `pm.sendRequest`,
-`setNextRequest`, `require(...)` and Postman's bundled libraries such as CryptoJS, moment
-and lodash. Scripts imported from Insomnia can use `insomnia` in place of `pm`. Scripts
-imported from Bruno can use `bru` (variables and `interpolate`), `req`, `res`, `test` and
-`expect`; `await`, `bru.sendRequest`, `bru.runRequest`, `bru.sleep` and `res('path')`
-queries are not supported. A value a script sets is stored as a "This Mac only" value. Collection and
-folder scripts run but cannot be edited in the app yet. A script stuck in an endless loop
-is not interrupted.
+- **Importers.** All in `Sources/APIEngine`: `Importer.swift` works out which app a file
+  came from, and `PostmanImporter.swift`, `InsomniaImporter.swift` and
+  `BrunoImporter.swift` read them.
+- **HTTP.** Requests go through the system's libcurl by way of `Sources/CCurlShim`. It is
+  built on LibreSSL, which cannot finish a TLS 1.3 handshake with a client certificate
+  against servers running OpenSSL 3 or later, so `HTTPClient` sends such a request once
+  more over TLS 1.2 and notes it in the wire log.
+- **gRPC.** Calls use libcurl's HTTP/2. The app reads the server's descriptors and
+  converts messages itself, and asks servers not to compress.
+- **WebSockets.** `URLSession`'s WebSocket task. A client certificate is loaded as an
+  identity in memory, never into the Keychain, which needs macOS 15; PEM files are first
+  packed into PKCS#12 with `/usr/bin/openssl`.
+- **Scripts.** JavaScriptCore, with a Postman-compatible `pm` object and thinner
+  `insomnia` and `bru` layers over it.
+- **Git Sync.** libgit2, built into the app, in `Sources/APIEngine/Git.swift`. SSH
+  addresses run the Mac's own `ssh`. Neither kind of sign-in has been tried against a real
+  host: the tests and the on-screen check used a remote in a local folder.
+- **API specs.** Kept in the workspace's `specs` folder, with the lint ruleset in
+  `specs/.spectral.yaml`. The linter and the YAML reader are the app's own. The YAML
+  reader covers what specs use: it does not support tags that change a value's type,
+  complex (`?`) keys, or more than one document in a file.
+- **Shortcuts.** The actions are in `Sources/APIPlayground/Shortcuts.swift`, and
+  `make-app.sh` generates their description into the app bundle.
+- **Look and feel.** The interface is custom rather than standard macOS controls. Every
+  colour and shared control lives in `Sources/APIPlayground/Theme.swift`. To add a theme,
+  add a `Palette` there and list it in `Palette.all`.
 
 ## Building
 
-You need Xcode installed. The Command Line Tools alone cannot build the SwiftUI app.
+The app is built for Apple silicon and macOS 14 or later. You need Xcode installed. The Command Line Tools alone cannot build the SwiftUI app.
 
 Run the engine tests:
 
@@ -479,7 +266,9 @@ The icon is a placeholder drawn by `Scripts/make-icon.swift`, which writes
 
 Versions 0.1.0 and 0.2.0 were both released this way on 26 November 2026: each time Apple
 accepted the app and the disk image, and Gatekeeper reports each as "Notarized Developer
-ID". 0.2.0 adds the features under "Inspecting responses" and "Tools" above.
+ID". 0.2.0 adds response filtering, the rate-limit gauge and token decoding, the TLS
+inspector, client certificates, copying as code, the repeat runner, the command palette,
+the menu-bar item and the Shortcuts actions.
 
 Version 0.3.0 was released the same way on 27 November 2026. It is the first build for
 Apple silicon only, which roughly halves the disk image (5.3 MB), and it adds the proxy
@@ -502,11 +291,14 @@ another Mac.
 
 | Path | Contents |
 |---|---|
+| `docs/User-Manual.md` | The user manual. |
+| `PLAN.md` | The plan: goals, design decisions, phases and open questions. |
+| `LICENSE` | The GNU General Public License, version 3. |
 | `Sources/APIEngine` | Model, file storage, variables, importers, HTTP. No UI code. |
 | `Sources/CCurlShim` | C wrappers for the libcurl functions Swift cannot call directly. |
 | `Sources/APIPlayground` | The SwiftUI and AppKit app. |
 | `Tests/APIEngineTests` | Engine tests. HTTP tests use a local server and need no internet. |
-| `Tests/Support` | A small gRPC server, run with Node, that the gRPC tests call. Those tests are skipped where Node is not installed. |
+| `Tests/Support` | A small gRPC server and a WebSocket server over TLS, run with Node, that the tests call. Those tests are skipped where Node is not installed. |
 | `Scripts/make-app.sh` | Builds the app bundle, including the description of its Shortcuts actions. |
-| `Scripts/release.sh` | Makes the signed, notarised disk image. Settings in `Scripts/release.conf`. |
+| `Scripts/release.sh` | Makes the signed, notarised disk image and the update feed. Settings in `Scripts/release.conf`. |
 | `Scripts/make-icon.swift` | Draws the placeholder icon into `Resources/`. |

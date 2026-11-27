@@ -1,6 +1,11 @@
 # API Playground — plan
 
-Status: draft, 25 November 2026. "API Playground" is a working name.
+Status: first written on 25 November 2026 and last brought up to date on 27 November 2026.
+Everything in it is built. Version 0.3.2 is published at
+[github.com/purpleax/API-Playground](https://github.com/purpleax/API-Playground) under
+GPL-3.0; 1.0 waits on the checks listed in the [README](README.md) and the open questions
+below. How to use the app is in the [user manual](docs/User-Manual.md). "API Playground"
+is a working name.
 
 ## What it is
 
@@ -46,7 +51,7 @@ The app has its own name and visual design. It matches Insomnia's feature set, n
 | Git | libgit2, built into the app (it replaced the `git` command in November 2026) | No dependency on a system Git install. HTTPS sign-ins come from the Keychain items Git itself uses; SSH goes through the Mac's own `ssh` |
 | Mock servers | In-process HTTP server on localhost | No separate process to manage |
 | Minimum system | macOS 14 on Apple silicon | The interface uses SwiftUI features that arrived in macOS 14 |
-| Distribution | Notarised direct download, updates through Sparkle | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
+| Distribution | Notarised direct download from GitHub releases, updates through Sparkle with its feed attached to each release | The Mac App Store sandbox makes Git access, local servers and helper binaries awkward |
 
 ### Code structure
 
