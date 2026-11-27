@@ -333,23 +333,29 @@ struct VariableEditor: View {
     }
 }
 
-/// The sheet for editing environments and global variables.
+/// The sheet for editing variables: the globals, each environment, and each collection's own.
 struct EnvironmentsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    /// nil means the globals are selected.
-    @State private var selected: UUID?
+    enum Scope: Hashable {
+        case globals
+        case environment(UUID)
+        case collection(UUID)
+    }
+
+    @State private var selected = Scope.globals
     @State private var draft = APIEnvironment()
     @State private var globalsDraft: [Variable] = []
+    @State private var collectionDraft: [Variable] = []
 
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        SelectableRow(isSelected: selected == nil) {
-                            selected = nil
+                        SelectableRow(isSelected: selected == .globals) {
+                            selected = .globals
                         } content: {
                             Image(systemName: "globe").foregroundStyle(Theme.info)
                             Text("Globals").font(.system(size: 13, weight: .medium))
@@ -360,8 +366,8 @@ struct EnvironmentsView: View {
                             .padding(.top, 12)
                             .padding(.bottom, 4)
                         ForEach(model.environments) { environment in
-                            SelectableRow(isSelected: selected == environment.id) {
-                                selected = environment.id
+                            SelectableRow(isSelected: selected == .environment(environment.id)) {
+                                selected = .environment(environment.id)
                             } content: {
                                 Circle()
                                     .fill(model.activeEnvironmentID == environment.id ? Theme.accent : Theme.textTertiary)
@@ -369,6 +375,23 @@ struct EnvironmentsView: View {
                                 Text(environment.name)
                                     .font(.system(size: 13))
                                     .lineLimit(1)
+                            }
+                        }
+                        if !model.collections.isEmpty {
+                            Text("Collections")
+                                .sectionTitle()
+                                .padding(.horizontal, 10)
+                                .padding(.top, 12)
+                                .padding(.bottom, 4)
+                            ForEach(model.collections) { collection in
+                                SelectableRow(isSelected: selected == .collection(collection.id)) {
+                                    selected = .collection(collection.id)
+                                } content: {
+                                    Image(systemName: "folder").foregroundStyle(Theme.textSecondary)
+                                    Text(collection.name)
+                                        .font(.system(size: 13))
+                                        .lineLimit(1)
+                                }
                             }
                         }
                     }
@@ -382,16 +405,22 @@ struct EnvironmentsView: View {
                         Text("A \"This Mac only\" value replaces the shared value here and is never saved to the workspace.")
                             .font(.callout)
                             .foregroundStyle(Theme.textSecondary)
-                        if selected == nil {
+                        switch selected {
+                        case .globals:
                             Text("Globals").font(.system(size: 17, weight: .bold))
                             Text("Available to every request. A collection or environment variable with the same name wins.")
                                 .foregroundStyle(Theme.textSecondary)
                             VariableEditor(variables: $globalsDraft, hidesSecrets: model.secretsHidden)
-                        } else {
+                        case .environment:
                             TextField("Environment name", text: $draft.name)
                                 .textFieldStyle(ThemedTextFieldStyle())
                                 .font(.headline)
                             VariableEditor(variables: $draft.variables, hidesSecrets: model.secretsHidden)
+                        case .collection(let id):
+                            Text(model.collections.first { $0.id == id }?.name ?? "Collection").font(.system(size: 17, weight: .bold))
+                            Text("Used by the requests in this collection, such as the address they all start with. An environment variable with the same name wins.")
+                                .foregroundStyle(Theme.textSecondary)
+                            VariableEditor(variables: $collectionDraft, hidesSecrets: model.secretsHidden)
                         }
                     }
                     .padding()
@@ -405,17 +434,17 @@ struct EnvironmentsView: View {
                     commit()
                     let environment = APIEnvironment()
                     model.saveEnvironment(environment)
-                    selected = environment.id
+                    selected = .environment(environment.id)
                 } label: {
                     Label("New Environment", systemImage: "plus")
                 }
                 Button("Delete", role: .destructive) {
-                    if let id = selected {
-                        selected = nil
+                    if case .environment(let id) = selected {
+                        selected = .globals
                         model.deleteEnvironment(id)
                     }
                 }
-                .disabled(selected == nil)
+                .disabled(!isEnvironment)
                 Spacer()
                 Button("Done") {
                     commit()
@@ -429,7 +458,12 @@ struct EnvironmentsView: View {
         .frame(width: 940, height: 520)
         .onAppear {
             globalsDraft = model.globals
-            selected = model.activeEnvironmentID
+            if let id = model.variablesCollection, model.collections.contains(where: { $0.id == id }) {
+                selected = .collection(id)
+            } else {
+                selected = model.activeEnvironmentID.map(Scope.environment) ?? .globals
+            }
+            model.variablesCollection = nil
             load(selected)
         }
         .onChange(of: selected) { old, new in
@@ -438,21 +472,33 @@ struct EnvironmentsView: View {
         }
     }
 
-    private func load(_ id: UUID?) {
-        if let id, let environment = model.environments.first(where: { $0.id == id }) {
-            draft = environment
+    private var isEnvironment: Bool {
+        if case .environment = selected { return true }
+        return false
+    }
+
+    private func load(_ scope: Scope) {
+        switch scope {
+        case .globals:
+            break
+        case .environment(let id):
+            if let environment = model.environments.first(where: { $0.id == id }) { draft = environment }
+        case .collection(let id):
+            collectionDraft = model.collections.first { $0.id == id }?.variables ?? []
         }
     }
 
-    /// Saves the edits for the environment that was showing.
-    private func commit(_ id: UUID?? = nil) {
-        let target = id ?? selected
-        if let target {
-            if draft.id == target, model.environments.contains(where: { $0.id == target }) {
+    /// Saves the edits for what was showing.
+    private func commit(_ scope: Scope? = nil) {
+        switch scope ?? selected {
+        case .globals:
+            model.saveGlobals(globalsDraft)
+        case .environment(let id):
+            if draft.id == id, model.environments.contains(where: { $0.id == id }) {
                 model.saveEnvironment(draft)
             }
-        } else {
-            model.saveGlobals(globalsDraft)
+        case .collection(let id):
+            model.saveVariables(collectionDraft, forCollection: id)
         }
     }
 }

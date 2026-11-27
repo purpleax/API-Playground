@@ -336,6 +336,63 @@ components:
         #expect(document.operations[0].responses[0].contentType == "application/json")
     }
 
+    private func spec(servers: String) -> String {
+        """
+        openapi: 3.0.3
+        info: {title: Shop, version: '1'}
+        \(servers)
+        paths:
+          /images/{seed}.svg:
+            get:
+              parameters:
+                - {name: seed, in: path, required: true, schema: {type: string}, example: helmet}
+              responses:
+                '200': {description: An image}
+        """
+    }
+
+    @Test func aServerGivenAsAPathStandsOnAPlaceholderHost() throws {
+        let root = try OpenAPIDocument(text: spec(servers: "servers: [{url: /}]"))
+        #expect(root.servers == ["http://localhost:8080"])
+        #expect(root.needsHost)
+        #expect(root.collection().variables[0] == Variable(key: "baseUrl", value: "http://localhost:8080"))
+
+        let prefixed = try OpenAPIDocument(text: spec(servers: "servers: [{url: /api/v1/}, {url: 'https://example.com'}]"))
+        #expect(prefixed.servers == ["http://localhost:8080/api/v1", "https://example.com"])
+        #expect(prefixed.needsHost)
+
+        // No servers at all is the same as "/": the collection still has somewhere to point.
+        let none = try OpenAPIDocument(text: spec(servers: ""))
+        #expect(none.servers.isEmpty)
+        #expect(none.needsHost)
+        #expect(none.collection().variables[0].value == "http://localhost:8080")
+    }
+
+    @Test func aServersAddressNeverEndsInASlash() throws {
+        let document = try OpenAPIDocument(text: spec(servers: "servers: [{url: 'https://example.com/'}, {url: '//cdn.example.com/v2/'}]"))
+        #expect(document.servers == ["https://example.com", "https://cdn.example.com/v2"])
+        #expect(!document.needsHost)
+    }
+
+    @Test func swagger2WithoutAHostKeepsItsBasePath() throws {
+        let document = try OpenAPIDocument(text: """
+        {"swagger": "2.0", "info": {"title": "Old API", "version": "1"}, "basePath": "/v2",
+         "paths": {"/things": {"get": {"responses": {"200": {"description": "ok"}}}}}}
+        """)
+        #expect(document.servers == ["http://localhost:8080/v2"])
+        #expect(document.needsHost)
+    }
+
+    @Test func aPathValueInsideAPartIsFilledWhenTheRequestIsSent() throws {
+        let collection = try OpenAPIDocument(text: spec(servers: "servers: [{url: /}]")).collection()
+        let request = try #require(collection.allRequests.first)
+        #expect(request.url == "{{baseUrl}}/images/:seed.svg")
+        let resolver = VariableResolver(scopes: [["baseUrl": collection.variables[0].value]])
+        let prepared = try RequestBuilder.prepare(request, auth: .none, resolver: resolver)
+        #expect(prepared.url == "http://localhost:8080/images/helmet.svg")
+        #expect(prepared.unresolved.isEmpty)
+    }
+
     @Test func textThatIsNotASpecIsRefused() {
         #expect(throws: OpenAPIError.self) { try OpenAPIDocument(text: "name: something else") }
         #expect(throws: OpenAPIError.self) { try OpenAPIDocument(text: "openapi: [") }

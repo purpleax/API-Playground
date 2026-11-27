@@ -62,12 +62,8 @@ public enum RequestBuilder {
         // URL and path variables
         var url = resolve(request.url).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { throw RequestBuildError.emptyURL }
-        for variable in request.pathVariables where variable.enabled && !variable.key.isEmpty {
-            let value = resolve(variable.value)
-            url = url.split(separator: "/", omittingEmptySubsequences: false)
-                .map { $0 == ":\(variable.key)" ? Substring(value) : $0 }
-                .joined(separator: "/")
-        }
+        let pathValues = request.pathVariables.filter { $0.enabled && !$0.key.isEmpty }.map { (key: $0.key, value: resolve($0.value)) }
+        url = fillPath(url, with: pathValues)
         if !url.contains("://") { url = "http://" + url }
 
         // Query parameters
@@ -194,6 +190,47 @@ public enum RequestBuilder {
         set.insert(charactersIn: "-._~")
         return set
     }()
+
+    /// Puts path values into a URL in place of their `:name` markers. A marker can be a whole
+    /// part of the path (`/pets/:id`) or sit inside one (`/images/:seed.svg`, `/v:version/pets`,
+    /// `/docs/:name:publish`), as long as the name ends there: `:id` is not found in `:idea`.
+    static func fillPath(_ url: String, with values: [(key: String, value: String)]) -> String {
+        guard !values.isEmpty, url.contains(":") else { return url }
+        // The first value given for a name is the one used, and a longer name is tried
+        // before a shorter one that starts it: `:user-id` before `:user`.
+        var candidates: [(key: String, value: String)] = []
+        for value in values where !candidates.contains(where: { $0.key == value.key }) { candidates.append(value) }
+        candidates.sort { $0.key.count > $1.key.count }
+
+        let end = url.firstIndex { $0 == "?" || $0 == "#" } ?? url.endIndex
+        // Before the path comes the host, where a colon is a port unless it starts a part.
+        var afterScheme = url.startIndex
+        if let scheme = url.range(of: "://"), scheme.upperBound <= end { afterScheme = scheme.upperBound }
+        let pathStart = url[afterScheme..<end].firstIndex(of: "/") ?? end
+
+        func endsName(_ next: Character?) -> Bool {
+            guard let next else { return true }
+            return !(next.isLetter || next.isNumber || next == "_")
+        }
+
+        var out = ""
+        var index = url.startIndex
+        while index < end {
+            if url[index] == ":" {
+                let rest = url[url.index(after: index)..<end]
+                let startsPart = index == url.startIndex || url[url.index(before: index)] == "/"
+                if index >= pathStart || startsPart,
+                   let found = candidates.first(where: { rest.hasPrefix($0.key) && endsName(rest.dropFirst($0.key.count).first) }) {
+                    out += found.value
+                    index = url.index(index, offsetBy: found.key.count + 1)
+                    continue
+                }
+            }
+            out.append(url[index])
+            index = url.index(after: index)
+        }
+        return out + url[end...]
+    }
 
     static func encodeQuery(_ text: String) -> String {
         text.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? text

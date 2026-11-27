@@ -120,6 +120,42 @@ import Testing
             try RequestBuilder.prepare(RequestItem(url: "  "), auth: .none, resolver: resolver)
         }
     }
+
+    private func filled(_ url: String, _ values: KeyValue...) throws -> String {
+        try RequestBuilder.prepare(RequestItem(url: url, pathVariables: values), auth: .none, resolver: resolver).url
+    }
+
+    @Test func pathValuesFillWholeParts() throws {
+        #expect(try filled("https://example.com/pets/:id/toys/:toy", KeyValue(key: "id", value: "7"), KeyValue(key: "toy", value: "{{token}}"))
+            == "https://example.com/pets/7/toys/abc")
+        // A value that is switched off, or has no marker, changes nothing.
+        #expect(try filled("https://example.com/pets/:id", KeyValue(key: "id", value: "7", enabled: false)) == "https://example.com/pets/:id")
+        #expect(try filled("https://example.com/pets", KeyValue(key: "id", value: "7")) == "https://example.com/pets")
+        // The first value given for a name is the one used.
+        #expect(try filled("{{host}}/pets/:id", KeyValue(key: "id", value: "1"), KeyValue(key: "id", value: "2")) == "http://example.com/pets/1")
+    }
+
+    @Test func pathValuesFillInsideAPart() throws {
+        #expect(try filled("https://example.com/images/:seed.svg", KeyValue(key: "seed", value: "helmet")) == "https://example.com/images/helmet.svg")
+        #expect(try filled("https://example.com/v:version/files/:name.:ext",
+                           KeyValue(key: "version", value: "2"), KeyValue(key: "name", value: "a"), KeyValue(key: "ext", value: "png"))
+            == "https://example.com/v2/files/a.png")
+        #expect(try filled("https://example.com/docs/:name:publish", KeyValue(key: "name", value: "d1")) == "https://example.com/docs/d1:publish")
+        // A name that goes on is a different name, and the longer of two names is preferred.
+        #expect(try filled("https://example.com/:idea/:id", KeyValue(key: "id", value: "7")) == "https://example.com/:idea/7")
+        #expect(try filled("https://example.com/:user-id/:user", KeyValue(key: "user", value: "u"), KeyValue(key: "user-id", value: "9"))
+            == "https://example.com/9/u")
+        // A value is not searched for markers of its own.
+        #expect(try filled("https://example.com/:a/:b", KeyValue(key: "a", value: ":b"), KeyValue(key: "b", value: "x")) == "https://example.com/:b/x")
+    }
+
+    @Test func aPortOrQueryIsNotAPathValue() throws {
+        #expect(try filled("https://example.com:8080/pets/:id", KeyValue(key: "8080", value: "no"), KeyValue(key: "id", value: "7"))
+            == "https://example.com:8080/pets/7")
+        #expect(try filled("localhost:8080/pets/:id", KeyValue(key: "8080", value: "no"), KeyValue(key: "id", value: "7"))
+            == "http://localhost:8080/pets/7")
+        #expect(try filled("https://example.com/pets/:id?at=10:id", KeyValue(key: "id", value: "7")) == "https://example.com/pets/7?at=10:id")
+    }
 }
 
 @Suite struct Storage {

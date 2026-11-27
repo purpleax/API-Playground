@@ -26,6 +26,10 @@ struct SpecView: View {
     /// The servers a route can be sent to: the spec's own, and the mock while one runs.
     private var servers: [String] {
         var list = document?.servers ?? []
+        // A spec that names no host is sent to the address filled in on its collection.
+        if document?.needsHost == true, let address = model.baseAddress(ofCollectionForSpec: file), !address.isEmpty, !list.contains(address) {
+            if list.isEmpty { list = [address] } else { list[0] = address }
+        }
         if let mock = model.mock, mock.collectionID == model.collection(forSpec: file)?.id { list.insert(mock.url, at: 0) }
         return list
     }
@@ -145,6 +149,11 @@ struct SpecView: View {
                         .font(.system(size: 12.5))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if let collection = model.collection(forSpec: file), let first = collection.allRequests.first {
+                        if let document, model.needsAddress(collection, for: document) {
+                            Button("Set Address…") { model.editVariables(ofCollection: collection.id) }
+                                .buttonStyle(SecondaryButtonStyle())
+                                .help("Set {{baseUrl}}, the address every request in the collection starts with")
+                        }
                         Button("Show It") { model.selection = first.id }
                             .buttonStyle(SecondaryButtonStyle())
                     }

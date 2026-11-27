@@ -202,6 +202,8 @@ final class AppModel {
     var historyVersion = 0
     var notice: Notice?
     var showingEnvironments = false
+    /// The collection whose variables the variables sheet opens on. Nil opens it where it usually does.
+    var variablesCollection: UUID?
     var runner: RunnerSession?
 
     /// The workspace's Git repository, or nil when its folder is not one.
@@ -486,6 +488,18 @@ final class AppModel {
         if activeEnvironmentID == id { activeEnvironmentID = nil }
         do { try store.deleteEnvironment(id: id) } catch { show("Could not delete the environment", error) }
         refreshGit()
+    }
+
+    /// Opens the variables sheet on a collection's own variables.
+    func editVariables(ofCollection id: UUID) {
+        variablesCollection = id
+        showingEnvironments = true
+    }
+
+    func saveVariables(_ variables: [Variable], forCollection id: UUID) {
+        guard let index = collections.firstIndex(where: { $0.id == id }), collections[index].variables != variables else { return }
+        collections[index].variables = variables
+        save(collections[index])
     }
 
     func saveGlobals(_ variables: [Variable]) {

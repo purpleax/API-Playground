@@ -120,6 +120,7 @@ struct SidebarView: View {
             Divider()
             Button("New Request") { model.newRequest(in: collection.id) }
             Button("New Folder") { model.newFolder(in: collection.id) }
+            Button("Variables…") { model.editVariables(ofCollection: collection.id) }
             Button("Rename") {
                 renameText = collection.name
                 renaming = collection.id

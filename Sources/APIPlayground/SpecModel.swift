@@ -161,14 +161,16 @@ extension AppModel {
         var collection = document.collection(specFile: file)
         let count = collection.allRequests.count
         let requests = "\(count) \(count == 1 ? "request" : "requests")"
-        let message: String
+        var message: String
         if let index = collections.firstIndex(where: { $0.specFile == file }) {
             let old = collections[index]
             // Requests keep their ids, and so their history, when their name and place are unchanged.
             collection = collection.adoptingIdentities(from: old)
-            // Values someone has filled in, such as a token, are kept.
+            // Values someone has filled in, such as a token, are kept. The base address follows
+            // the spec when the spec names a host; when it does not, the one filled in is kept too.
             collection.variables = collection.variables.map { variable in
-                guard variable.key != OpenAPIDocument.baseVariable, let kept = old.variables.first(where: { $0.key == variable.key }) else { return variable }
+                let fromSpec = variable.key == OpenAPIDocument.baseVariable && !document.needsHost
+                guard !fromSpec, let kept = old.variables.first(where: { $0.key == variable.key }) else { return variable }
                 return kept
             }
             collections[index] = collection
@@ -178,9 +180,26 @@ extension AppModel {
             collections.append(collection)
             message = "Made the collection “\(collection.name)” from this spec: \(requests), each with its documented responses as examples."
         }
+        if needsAddress(collection, for: document) {
+            message += " The spec does not say which server it is for, so requests go to \(OpenAPIDocument.placeholderServer) until you set the address."
+        }
         expanded.insert(collection.id)
         save(collection)
         return (collection.id, message)
+    }
+
+    /// The address a spec's collection sends to: its `baseUrl`, as used on this Mac.
+    func baseAddress(ofCollectionForSpec file: String) -> String? {
+        collection(forSpec: file)?.variables
+            .first { $0.key == OpenAPIDocument.baseVariable && $0.enabled }
+            .map(\.effectiveValue)
+    }
+
+    /// True when a spec names no host and nobody has yet said where its collection should send.
+    func needsAddress(_ collection: APICollection, for document: OpenAPIDocument) -> Bool {
+        guard document.needsHost else { return false }
+        let base = collection.variables.first { $0.key == OpenAPIDocument.baseVariable }?.effectiveValue
+        return base == (document.servers.first ?? OpenAPIDocument.placeholderServer)
     }
 
     /// Opens the mock server sheet for a spec's collection, making the collection first if need be.

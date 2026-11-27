@@ -158,8 +158,10 @@ environment wins over the collection, and the collection wins over globals.
 | Collection | Values that belong to one collection, such as its base address |
 | Environment | Values that change between servers: staging, production and so on |
 
-**Request > Environments… (⌘E)** edits environments and globals. The switcher in the top
-bar chooses which environment is active.
+**Request > Environments… (⌘E)** edits all three: globals, each environment, and each
+collection's own variables, listed under Collections. Right-clicking a collection and
+choosing **Variables…** opens it on that collection. The switcher in the top bar chooses
+which environment is active.
 
 Each variable has up to three parts:
 
@@ -406,6 +408,10 @@ jumps to its line.
   documented response saved as an example, and a check on the success status. Pressing it
   again updates the same collection, and requests keep their history. Edits you made to
   the generated requests are replaced.
+- **A spec that names no host**, because it has no servers or gives only a path such as
+  `/` or `/v1`, gets `{{baseUrl}}` set to `http://localhost:8080`. **Set Address…**, shown
+  after Make Collection, opens the collection's variables to change it. The address you
+  set is kept when the collection is updated, and the routes' send buttons use it too.
 - **Mock Server** makes the collection and serves its documented responses.
 - **Example values** come from the spec's `example`, `examples` and `default`, and are
   otherwise made up from the schema.

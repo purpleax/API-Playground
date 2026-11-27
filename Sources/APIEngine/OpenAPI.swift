@@ -66,7 +66,13 @@ public struct OpenAPIDocument: Sendable {
     public var title: String
     public var version: String
     public var description: String
+    /// Where the API is served, as full addresses with no trailing slash. A server the spec
+    /// gives as a path alone ("/" or "/v1") stands on `placeholderServer`.
     public var servers: [String]
+    /// True when the spec does not say which host serves the API: it lists no servers, or its
+    /// first is a path alone, which means "wherever this document was fetched from". A file
+    /// on disk cannot answer that, so the address is for the person using it to fill in.
+    public var needsHost = false
     public var tags: [String]
     public var operations: [OpenAPIOperation]
     /// The scheme names in the document's own `security`, and what each scheme is.
@@ -76,6 +82,26 @@ public struct OpenAPIDocument: Sendable {
     public var isSwagger2: Bool { specVersion.hasPrefix("2") }
 
     static let methods = ["get", "put", "post", "delete", "options", "head", "patch", "trace"]
+
+    /// The host a request is sent to when the spec names none.
+    public static let placeholderServer = "http://localhost:8080"
+
+    /// A server's address in the form requests are built on, and whether the spec gave it
+    /// as a path alone. `/` becomes the placeholder host, and `https://api.example.com/v1/`
+    /// loses its last slash, so that adding `/pets` never makes `//pets`.
+    static func address(ofServer url: String) -> (address: String, isPath: Bool) {
+        var url = url.trimmingCharacters(in: .whitespaces)
+        var isPath = false
+        if url.hasPrefix("//") {
+            // The same scheme as the document's: assume the usual one.
+            url = "https:" + url
+        } else if url.isEmpty || url.hasPrefix("/") {
+            isPath = true
+            url = placeholderServer + url
+        }
+        while url.hasSuffix("/"), !url.hasSuffix("://") { url.removeLast() }
+        return (url, isPath)
+    }
 
     public init(text: String) throws {
         let parsed: SpecNode
@@ -107,15 +133,19 @@ public struct OpenAPIDocument: Sendable {
 
         if specVersion.hasPrefix("2") {
             let host = root["host"]?.string ?? ""
+            var base = root["basePath"]?.string ?? ""
+            if base == "/" { base = "" }
             if !host.isEmpty {
                 let scheme = root["schemes"]?.items.first?.string ?? "https"
-                var base = root["basePath"]?.string ?? ""
-                if base == "/" { base = "" }
-                servers = ["\(scheme)://\(host)\(base)"]
+                servers = [Self.address(ofServer: "\(scheme)://\(host)\(base)").address]
+            } else if base.hasPrefix("/") {
+                // A base path with no host is served from wherever the document was.
+                servers = [Self.address(ofServer: base).address]
+                needsHost = true
             }
             for entry in root["securityDefinitions"]?.entries ?? [] { securitySchemes[entry.key] = entry.node }
         } else {
-            servers = (root["servers"]?.items ?? []).compactMap { server in
+            let listed = (root["servers"]?.items ?? []).compactMap { server -> (address: String, isPath: Bool)? in
                 guard var url = server["url"]?.string else { return nil }
                 // Fill in each {variable} with its default.
                 for variable in server["variables"]?.entries ?? [] {
@@ -123,12 +153,15 @@ public struct OpenAPIDocument: Sendable {
                         url = url.replacingOccurrences(of: "{\(variable.key)}", with: value)
                     }
                 }
-                return url
+                return Self.address(ofServer: url)
             }
+            servers = listed.map(\.address)
+            needsHost = listed.first?.isPath ?? false
             for entry in root["components"]?["securitySchemes"]?.entries ?? [] {
                 securitySchemes[entry.key] = resolve(entry.node)
             }
         }
+        if servers.isEmpty { needsHost = true }
         defaultSecurity = Self.schemeNames(root["security"]) ?? []
 
         for pathEntry in root["paths"]?.entries ?? [] where pathEntry.key.hasPrefix("/") {
@@ -479,7 +512,7 @@ public struct OpenAPIDocument: Sendable {
             return .folder(Folder(name: tag, items: items))
         }
 
-        var variables = [Variable(key: Self.baseVariable, value: servers.first ?? "http://localhost:8080")]
+        var variables = [Variable(key: Self.baseVariable, value: servers.first ?? Self.placeholderServer)]
         let auth = Self.auth(for: defaultSecurity, schemes: securitySchemes) ?? .none
         var needed: [String] = []
         func note(_ auth: Auth) {

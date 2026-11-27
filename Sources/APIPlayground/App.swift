@@ -493,7 +493,7 @@ struct TopBar: View {
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }
-            IconButton(systemImage: "slider.horizontal.3", help: "Edit environments and global variables") {
+            IconButton(systemImage: "slider.horizontal.3", help: "Edit variables: globals, environments and each collection's own") {
                 model.showingEnvironments = true
             }
             IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,
