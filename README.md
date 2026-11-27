@@ -39,6 +39,9 @@ Covered by engine tests:
 - Collections stored as one file per request, folder and environment
 - `{{variable}}` resolution with Postman's scope order
 - Secret values kept in the Keychain, and "This Mac only" values kept outside the workspace
+- The Variables table: one shown value for each variable, keeping a value on this Mac or
+  making it secret, an environment's own value for a name being set, cleared and renamed,
+  and names found only in environments
 - Basic, Bearer and API-key auth, inherited from folders and collections
 - Sending requests with libcurl, with per-phase timings and a wire log
 - cURL command import
@@ -122,10 +125,15 @@ Checked by hand in the running app:
   where it is now skipped with a note
 - Added in 0.3.3 and after, in the test copy, with a JSON spec whose server is `/`: Make
   Collection saying the spec names no server, Set Address… opening the Variables sheet on
-  the collection, a change made there being saved, a route sent from the spec to the
-  address set on the collection, and Update Collection keeping that address. In the
-  Variables sheet: Request > Variables… opening it, the globals, a collection and a new
-  environment each shown under its own heading, and an environment added and deleted
+  the collection, a route sent from the spec to the address set on the collection, and
+  Update Collection keeping that address
+- The Variables sheet, in the test copy, by clicking: a collection's table with an
+  environment's column beside it and "In use" on the one chosen; Add Environment; a
+  variable set only in an environment listed apart, given a value in the collection, and
+  removed from every environment; removing a row; This Mac only moving a value out of
+  the collection's file; Secret; the shared variables; and all of it saved by Done and
+  there again after a restart. Removing a row crashed the first build of this sheet,
+  which is how the fault was found
 - An update from inside the app: a copy of 0.3.3 in Applications found 0.3.4, installed
   it and reopened as 0.3.4
 
@@ -151,9 +159,11 @@ Not yet checked:
   too quickly to watch)
 - A failed gRPC call showing the server's message as the response body (changed after it
   was last looked at)
-- A collection's variables: the Variables… item in a collection's menu, and typing a new
-  address into the sheet (a tick box changed there was saved, and the address was set in
-  the collection's file)
+- In the Variables sheet: typing into any field (names, values and an environment's
+  cells were only clicked, never typed in), so a renamed variable carrying its
+  environment values with it is covered by the engine test alone; the … menu on an
+  environment's column (use, rename, delete); Requests use; and the Variables… item in a
+  collection's menu
 - API specs: New API Spec, Import OpenAPI Spec, deleting a spec, a
   Swagger 2.0 spec on screen, Update Collection after editing a spec, and a large real
   spec such as Stripe's or GitHub's
@@ -305,9 +315,9 @@ update to.
 
 Version 0.3.4 followed the same day. It gave a collection's variables a sheet of their
 own, apart from the Environments sheet, where listing them made a collection look like an
-environment. That hid them, so the next version puts globals, collection variables and
-environments together in one Variables sheet, each under a heading that says when it is
-used.
+environment. That hid them, so the next version has one Variables sheet in which a
+collection's variables are a table and each environment is a column of other values for
+the same names. The environment switcher is not shown until there is an environment.
 
 The update feed has now been used: a copy of 0.3.3 in Applications found 0.3.4, installed
 it and reopened as 0.3.4. Not checked: an update from 0.3.2, and the disk image opened on

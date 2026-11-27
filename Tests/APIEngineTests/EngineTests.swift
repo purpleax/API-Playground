@@ -48,6 +48,105 @@ import Testing
     }
 }
 
+@Suite struct TheVariableTable {
+    @Test func aVariableShowsOneValue() {
+        var shared = Variable(key: "baseUrl", value: "https://example.com")
+        #expect(shared.shownValue == "https://example.com")
+        #expect(!shared.isLocalOnly)
+        shared.shownValue = "https://example.org"
+        #expect(shared.value == "https://example.org")
+        #expect(shared.currentValue == nil)
+
+        // A value saved by a request is kept on this Mac, and that is the one shown and edited.
+        var saved = Variable(key: "token", value: "", currentValue: "abc")
+        #expect(saved.shownValue == "abc")
+        #expect(saved.isLocalOnly)
+        saved.shownValue = ""
+        #expect(saved.currentValue == "")
+        #expect(saved.isLocalOnly)
+    }
+
+    @Test func keepingAValueOnThisMacMovesItOffTheWorkspace() {
+        var variable = Variable(key: "token", value: "abc")
+        variable.isLocalOnly = true
+        #expect(variable.value == "")
+        #expect(variable.currentValue == "abc")
+        #expect(variable.shownValue == "abc")
+        variable.isLocalOnly = false
+        #expect(variable.value == "abc")
+        #expect(variable.currentValue == nil)
+    }
+
+    @Test func makingAValueSecretKeepsWhatItShows() {
+        var variable = Variable(key: "token", value: "", currentValue: "abc")
+        variable.setSecret(true)
+        #expect(variable.secret)
+        #expect(variable.value == "abc")
+        #expect(variable.currentValue == nil)
+        #expect(!variable.isLocalOnly)
+        // A secret cannot also be marked as on this Mac only: it already is.
+        variable.isLocalOnly = true
+        #expect(variable.currentValue == nil)
+        variable.setSecret(false)
+        #expect(variable.shownValue == "abc")
+    }
+
+    @Test func anEnvironmentGivesAVariableAnotherValue() {
+        var staging = APIEnvironment(name: "Staging")
+        #expect(staging.override(named: "baseUrl") == nil)
+        staging.setOverride("https://staging.example.com", for: "baseUrl")
+        #expect(staging.variables == [Variable(key: "baseUrl", value: "https://staging.example.com")])
+
+        // Typing over it changes the value, and switches it back on.
+        staging.variables[0].enabled = false
+        staging.setOverride("https://s2.example.com", for: "baseUrl")
+        #expect(staging.variables == [Variable(key: "baseUrl", value: "https://s2.example.com")])
+
+        // A value saved into the environment by a request stays on this Mac when edited.
+        staging.variables.append(Variable(key: "token", value: "", currentValue: "abc"))
+        staging.setOverride("def", for: "token")
+        #expect(staging.override(named: "token")?.currentValue == "def")
+        #expect(staging.override(named: "token")?.value == "")
+
+        // Emptying the cell takes the value away, so the collection's applies again.
+        staging.setOverride("", for: "baseUrl")
+        #expect(staging.override(named: "baseUrl") == nil)
+        staging.setOverride("x", for: "")
+        #expect(staging.variables.map(\.key) == ["token"])
+
+        staging.setOverride("s3cret", for: "password", secret: true)
+        #expect(staging.override(named: "password")?.secret == true)
+    }
+
+    @Test func anEnvironmentsValueFollowsARename() {
+        var staging = APIEnvironment(name: "Staging", variables: [
+            Variable(key: "baseUrl", value: "a"), Variable(key: "host", value: "b"),
+        ])
+        let renamed = staging.renameVariable("baseUrl", to: "address")
+        #expect(renamed)
+        #expect(staging.variables.map(\.key) == ["address", "host"])
+        // A name that is already taken is left alone, and so is an empty one.
+        let taken = staging.renameVariable("address", to: "host")
+        #expect(!taken)
+        let emptied = staging.renameVariable("address", to: "")
+        #expect(emptied)
+        #expect(staging.variables.map(\.key) == ["address", "host"])
+    }
+
+    @Test func namesOnlyInEnvironmentsAreListedOnce() {
+        let staging = APIEnvironment(name: "Staging", variables: [Variable(key: "baseUrl", value: "a"), Variable(key: "region", value: "eu")])
+        let production = APIEnvironment(name: "Production", variables: [Variable(key: "region", value: "us"), Variable(key: "", value: "x"), Variable(key: "tier", value: "1")])
+        #expect(VariableTable.names(onlyIn: [staging, production], notAmong: ["baseUrl", "token"]) == ["region", "tier"])
+        #expect(VariableTable.names(onlyIn: [], notAmong: []) == [])
+    }
+
+    @Test func aNewEnvironmentGetsANameOfItsOwn() {
+        #expect(VariableTable.newEnvironmentName(among: []) == "New Environment")
+        let taken = [APIEnvironment(name: "New Environment"), APIEnvironment(name: "New Environment 2")]
+        #expect(VariableTable.newEnvironmentName(among: taken) == "New Environment 3")
+    }
+}
+
 @Suite struct RequestBuilding {
     let resolver = VariableResolver(scopes: [["host": "example.com", "token": "abc"]])
 

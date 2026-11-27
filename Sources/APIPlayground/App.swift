@@ -485,7 +485,8 @@ struct TopBar: View {
                 .help("The mock server is running. Click to see its routes and requests.")
             }
 
-            environmentMenu
+            // With no environments there is nothing to choose between, so nothing is shown.
+            if !model.environments.isEmpty { environmentMenu }
 
             IconButton(systemImage: "command", active: model.showingPalette, help: "Command palette: go to a request or run a command (⌘K)") {
                 model.showingPalette.toggle()
@@ -493,7 +494,7 @@ struct TopBar: View {
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }
-            IconButton(systemImage: "slider.horizontal.3", help: "Variables: globals, each collection's own, and environments (⌘E)") {
+            IconButton(systemImage: "slider.horizontal.3", help: "Variables and environments (⌘E)") {
                 model.showingEnvironments = true
             }
             IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,

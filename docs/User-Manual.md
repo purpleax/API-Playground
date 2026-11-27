@@ -52,8 +52,9 @@ newer download by hand.
   Params, Headers, Body, Auth, Tests and Scripts.
 - **Response** (right): the status, size and time, with tabs for the body, headers and
   more. See [Reading a response](#8-reading-a-response).
-- **Top bar**: the name of the workspace, the environment switcher, and buttons for the
-  command palette, the theme, the Variables sheet, Hide Secrets and the mock server.
+- **Top bar**: the name of the workspace, the environment switcher once you have an
+  environment, and buttons for the command palette, the theme, the Variables sheet, Hide
+  Secrets and the mock server.
 
 **⌘K** opens the command palette, which finds any request or command by typing part of
 its name.
@@ -151,39 +152,41 @@ A request waits up to 30 seconds for a response. Event streams are not cut off.
 
 ## 6. Variables and environments
 
-Variables let one request work against several servers or accounts. Write `{{name}}` in
-an address, a header, a body or an auth field.
+A variable is a name with a value. Write `{{name}}` in an address, a header, a body or
+an auth field, and it is replaced with the value when the request is sent.
 
-There are three places a variable can live. When the same name is in more than one, the
-environment wins over the collection, and the collection wins over globals.
+**Request > Variables… (⌘E)** opens the Variables sheet on the collection you are working
+in. Right-clicking a collection and choosing **Variables…** opens it on that collection.
 
-| Scope | Use it for |
-|---|---|
-| Globals | Values every request can use |
-| Collection | Values that belong to one collection, such as its base address |
-| Environment | Values that change between servers: staging, production and so on |
+**A collection's variables** are a table: a name and a value on each row. Every request in
+the collection can use them. **Add Variable** adds a row.
 
-**Request > Variables… (⌘E)** edits all three in one sheet. Its list has a heading for
-each, saying when those variables are used:
+**Environments** are for talking to more than one server, such as staging and production.
+An environment is another column in the same table: for any variable it can hold a
+different value, and a cell left empty means "same as the Value column". **Add
+Environment** adds a column. Only one environment is used at a time. Choose it with
+**Requests use** at the top of the sheet or with the switcher in the top bar, which
+appears once there is an environment. Its column is marked "In use". With no environment
+chosen, the Value column is used for everything. The **…** on a column heading uses,
+renames or deletes that environment.
 
-- **Everywhere**: the globals.
-- **Collections**: each collection's own variables. They always apply to that
-  collection's requests, whichever environment is chosen. A collection is not an
-  environment.
-- **Environments**: each environment. Only one is used at a time, the one chosen in the
-  switcher in the top bar, and it is marked "In use". "No Environment" there means none
-  is, and the globals and collection variables still apply.
+An environment belongs to the workspace, not to one collection, so its columns appear in
+every collection's table. A variable that has a value in an environment but is not one of
+the collection's own is listed under "Set only in an environment".
 
-Right-clicking a collection in the sidebar and choosing **Variables…** opens the same
-sheet on that collection.
+**Shared by all collections**, at the bottom of the list, holds variables every
+collection can use (Postman's globals). A collection's own variable with the same name is
+used in its place.
 
-Each variable has up to three parts:
+Beside each value are three buttons:
 
-- **Shared value**: saved in the workspace, and shared with anyone you share it with.
-- **This Mac only**: used in place of the shared value on your Mac. It is never saved to
-  the workspace, so it is the place for your own token or a local address.
-- **Secret**: tick this for passwords, tokens and keys. The value is kept in your Mac's
-  Keychain, not in a file, and is masked when Hide Secrets is on.
+- **This Mac only** (the laptop): keeps the value on your Mac and out of the workspace, so
+  it is not shared and stays out of Git. A value saved from a response starts this way.
+- **Secret** (the lock): for passwords, tokens and keys. The value is kept in your Mac's
+  Keychain, not in a file, and is masked on screen.
+- **Remove** (the minus).
+
+Unticking a row leaves the variable out without deleting it.
 
 These names are filled in for you each time a request is sent: `{{$guid}}` and
 `{{$randomUUID}}` (a new UUID), `{{$timestamp}}` (seconds since 1970),

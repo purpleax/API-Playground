@@ -17,11 +17,11 @@ IDENTITY="${SIGN_IDENTITY:-}"
 source Scripts/release.conf
 CONFIG="${1:-release}"
 
-# Stops with the given message when the app in ./build is open. Replacing it underneath a
-# running copy leaves that copy half old and half new: it goes on showing the old version
-# while its files are the new one.
+# Stops with the given message when the copy about to be built is open. Replacing it
+# underneath a running copy leaves that copy half old and half new: it goes on running the
+# old code while its files are the new one. $NAME says which copy: the app or the test copy.
 stop_if_running() {
-    if pgrep -x APIPlayground >/dev/null && pgrep -fl APIPlayground | grep -q "build/API Playground.app/"; then
+    if pgrep -x APIPlayground >/dev/null && pgrep -fl APIPlayground | grep -q "build/$NAME.app/"; then
         echo "$1" >&2
         exit 1
     fi
@@ -35,9 +35,8 @@ if [ "${2:-}" = "test" ]; then
     BUNDLE_ID="com.apiplayground.app.test"
     # The test copy never updates itself.
     FEED=""
-else
-    stop_if_running "API Playground is running. Quit it first, so it is not replaced while in use."
 fi
+stop_if_running "$NAME is running. Quit it first, so it is not replaced while in use."
 
 # SwiftUI needs the full Xcode toolchain, not just the Command Line Tools.
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app ]; then
@@ -51,9 +50,7 @@ BIN="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/APIPl
 
 APP="build/$NAME.app"
 # The build above takes a while, and the app may have been opened since the first look.
-if [ "${2:-}" != "test" ]; then
-    stop_if_running "API Playground was opened while it was being built. Quit it and run this again. The copy in build has not been replaced."
-fi
+stop_if_running "$NAME was opened while it was being built. Quit it and run this again. The copy in build has not been replaced."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN" "$APP/Contents/MacOS/APIPlayground"
