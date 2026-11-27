@@ -89,10 +89,17 @@ fi
 
 if [ -n "$FEED_URL" ]; then
     echo "== Update feed"
-    # Signs each disk image in the folder with the update key and writes appcast.xml beside them.
+    # Signs this version's disk image with the update key and writes appcast.xml. The feed
+    # lists only the newest version, which is all an installed copy needs to find.
+    FEED_DIR="$OUT/feed"
+    rm -rf "$FEED_DIR"
+    mkdir -p "$FEED_DIR"
+    cp "$DMG" "$FEED_DIR/"
     .build/artifacts/sparkle/Sparkle/bin/generate_appcast --account "$SPARKLE_KEY_ACCOUNT" \
-        --download-url-prefix "${FEED_URL%/*}/" "$OUT"
-    echo "Upload $DMG and $OUT/appcast.xml to ${FEED_URL%/*}/"
+        --download-url-prefix "${DOWNLOAD_PREFIX:-${FEED_URL%/*}/}" "$FEED_DIR"
+    mv "$FEED_DIR/appcast.xml" "$OUT/appcast.xml"
+    rm -rf "$FEED_DIR"
+    echo "Attach $DMG and $OUT/appcast.xml to the release v$VERSION."
 else
     echo "No update feed is set in Scripts/release.conf, so this build does not check for updates."
 fi

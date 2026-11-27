@@ -175,7 +175,7 @@ Every item under [Features](#features) is now built as well, the last of them in
 
 ## Open questions
 
-- **Open or closed source.** Affects pricing and how the app competes with Bruno. libcurl, vacuum and libgit2 all allow either.
+- **Open or closed source.** Decided on 27 November 2026: open source under GPL-3.0, in a public GitHub repository. Pricing has to fit that: anyone may build and share the app.
 - **Pricing.** Suggested: a one-time purchase with a year of updates and a free trial. Git Sync should not sit behind a subscription.
 - **Final name.**
 - **The app's own file format.** YAML or JSON, and the folder layout.

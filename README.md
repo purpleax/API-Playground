@@ -2,6 +2,11 @@
 
 A native Mac app for managing, running, testing and demoing APIs. See [PLAN.md](PLAN.md) for the full plan.
 
+Download the newest version from [Releases](https://github.com/purpleax/API-Playground/releases/latest).
+It needs macOS 14 or later on Apple silicon, and from 0.3.2 it updates itself.
+
+API Playground is free software under the [GNU General Public License, version 3](LICENSE).
+
 ## Status
 
 Phases 1 to 6 are built, and so is every feature listed in [PLAN.md](PLAN.md).
@@ -444,7 +449,12 @@ open "build/API Playground.app"
 5. Packs the app and a link to Applications into a disk image, then signs, notarises and
    staples that too.
 6. If an update feed is set, signs the disk image with the update key and writes
-   `appcast.xml` beside it.
+   `appcast.xml` beside it, listing that version only.
+
+Publishing is a separate step: make a GitHub release tagged `v` and the version, and
+attach the disk image and `appcast.xml` to it. Installed copies read the feed from the
+newest release (`releases/latest/download/appcast.xml`), so a release only reaches them
+once it is published and is not a draft or pre-release.
 
 Settings are in `Scripts/release.conf`: the version and build number (raise both for every
 release), the update feed's address, and the names of the Keychain items below. Two things
@@ -458,8 +468,10 @@ must be set up once on the Mac that makes releases:
   `api-playground`. Keep a backup: without it no update can be signed. Export one with
   `.build/artifacts/sparkle/Sparkle/bin/generate_keys --account api-playground -x FILE`.
 
-Updates stay switched off, and the app has no "Check for Updates…", until `FEED_URL` in
-`release.conf` names where `appcast.xml` will be hosted. The test copy never updates.
+`FEED_URL` in `release.conf` names where `appcast.xml` is hosted; with it empty the app is
+built without updates and has no "Check for Updates…". The test copy never updates.
+Renaming or moving the GitHub repository would change that address, and copies already
+installed would stop finding updates.
 
 The icon is a placeholder drawn by `Scripts/make-icon.swift`, which writes
 `Resources/AppIcon.icns`. The licences of Sparkle and libgit2 are copied into the app as
@@ -478,8 +490,13 @@ Version 0.3.1 followed the same day with the two collection-runner fixes that th
 of 0.3.0 found: a gRPC call's status is shown correctly, and a WebSocket request is
 skipped in a run.
 
-Not checked: an update has never been downloaded and installed, because there is no feed
-yet; and the disk image has not been opened on another Mac.
+Version 0.3.2, also on 27 November 2026, is the first with an update feed and the first
+published on GitHub. Versions before it never check for updates and have to be replaced
+by hand.
+
+Not checked: an update has never been downloaded and installed, because that needs a
+version newer than 0.3.2 to be published; and the disk image has not been opened on
+another Mac.
 
 ## Layout
 
