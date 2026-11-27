@@ -91,7 +91,7 @@ Checked by hand in the running app:
 
 Not yet checked:
 
-- Everything added after 0.2.0 has been tested in the engine but not looked at in the
+- Everything added in 0.3.0 has been tested in the engine but not looked at in the
   running app, apart from an Insomnia export's cookies arriving: the Proxy and
   Certificates sheet, a request through a proxy, a gRPC request in the collection runner,
   Compare Across Environments, and a WebSocket with a certificate
@@ -461,6 +461,11 @@ The icon is a placeholder drawn by `Scripts/make-icon.swift`, which writes
 Versions 0.1.0 and 0.2.0 were both released this way on 26 November 2026: each time Apple
 accepted the app and the disk image, and Gatekeeper reports each as "Notarized Developer
 ID". 0.2.0 adds the features under "Inspecting responses" and "Tools" above.
+
+Version 0.3.0 was released the same way on 27 November 2026. It is the first build for
+Apple silicon only, which roughly halves the disk image (5.3 MB), and it adds the proxy
+setting, gRPC through the request engine, client certificates for WebSockets and gRPC,
+imported cookies and settings, and Compare Across Environments.
 
 Not checked: an update has never been downloaded and installed, because there is no feed
 yet; and the disk image has not been opened on another Mac.
