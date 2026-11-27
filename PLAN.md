@@ -1,7 +1,7 @@
 # API Playground — plan
 
-Status: first written on 25 November 2026 and last brought up to date on 27 November 2026.
-Everything in it is built. Version 0.3.4 is published at
+Status: first written on 25 November 2026 and last brought up to date on 28 November 2026.
+Everything in it is built. Version 0.3.5 is published at
 [github.com/purpleax/API-Playground](https://github.com/purpleax/API-Playground) under
 GPL-3.0; 1.0 waits on the checks listed in the [README](README.md) and the open questions
 below. How to use the app is in the [user manual](docs/User-Manual.md). "API Playground"

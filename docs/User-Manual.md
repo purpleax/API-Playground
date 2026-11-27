@@ -4,7 +4,7 @@ API Playground is a Mac app for managing, running, testing and demoing APIs. Eve
 you make is kept in plain files on your Mac. There is no account and nothing is sent to a
 server of ours.
 
-This manual describes version 0.3.4.
+This manual describes version 0.3.5.
 
 ## Contents
 

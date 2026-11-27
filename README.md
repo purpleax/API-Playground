@@ -318,7 +318,7 @@ Version 0.3.4 followed the same day. It gave a collection's variables a sheet of
 own, apart from the Environments sheet, where listing them made a collection look like an
 environment. That hid them.
 
-The version after it has two kinds of variable and no more: global ones, used by every
+Version 0.3.5, on 28 November 2026, has two kinds of variable and no more: global ones, used by every
 collection, and each collection's own. Environments are gone, and with them the switcher
 in the top bar, Compare Across Environments and the Set Environment action in Shortcuts.
 An environment imported from Postman, Insomnia or Bruno is added to a collection the app
