@@ -17,6 +17,16 @@ IDENTITY="${SIGN_IDENTITY:-}"
 source Scripts/release.conf
 CONFIG="${1:-release}"
 
+# Stops with the given message when the app in ./build is open. Replacing it underneath a
+# running copy leaves that copy half old and half new: it goes on showing the old version
+# while its files are the new one.
+stop_if_running() {
+    if pgrep -x APIPlayground >/dev/null && pgrep -fl APIPlayground | grep -q "build/API Playground.app/"; then
+        echo "$1" >&2
+        exit 1
+    fi
+}
+
 NAME="API Playground"
 BUNDLE_ID="com.apiplayground.app"
 FEED="$FEED_URL"
@@ -25,9 +35,8 @@ if [ "${2:-}" = "test" ]; then
     BUNDLE_ID="com.apiplayground.app.test"
     # The test copy never updates itself.
     FEED=""
-elif pgrep -x APIPlayground >/dev/null && pgrep -fl APIPlayground | grep -q "build/API Playground.app/"; then
-    echo "API Playground is running. Quit it first, so it is not replaced while in use." >&2
-    exit 1
+else
+    stop_if_running "API Playground is running. Quit it first, so it is not replaced while in use."
 fi
 
 # SwiftUI needs the full Xcode toolchain, not just the Command Line Tools.
@@ -41,6 +50,10 @@ swift build -c "$CONFIG" --product APIPlayground ${ARCHS[@]+"${ARCHS[@]}"}
 BIN="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/APIPlayground"
 
 APP="build/$NAME.app"
+# The build above takes a while, and the app may have been opened since the first look.
+if [ "${2:-}" != "test" ]; then
+    stop_if_running "API Playground was opened while it was being built. Quit it and run this again. The copy in build has not been replaced."
+fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN" "$APP/Contents/MacOS/APIPlayground"
