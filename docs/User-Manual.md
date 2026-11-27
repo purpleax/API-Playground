@@ -142,6 +142,11 @@ Collection (⇧⌘N)** starts a collection. Choose the method, type the address,
 Anywhere you can type a value, `{{name}}` is replaced with the variable of that name when
 the request is sent.
 
+**Path values.** A request that was imported, or made from a spec, can have `:name`
+markers in its address, such as `/pets/:id`. Their values are under **Path variables** on
+the Params tab, and each replaces its marker when the request is sent. A marker can be a
+whole part of the address or sit inside one, as in `/images/:seed.svg` or `/v:version/pets`.
+
 A request waits up to 30 seconds for a response. Event streams are not cut off.
 
 ## 6. Variables and environments
@@ -433,6 +438,9 @@ Limits:
   skipped, and the problems list says so.
 - A ruleset can extend `spectral:oas` only, not a file or a web address.
 - A `$ref` to another file is not followed.
+- The mock matches a path value only when the marker starts a part of the path. A route
+  such as `/images/{seed}.svg` is served, for any last part. One such as `/v{version}/pets`
+  is not.
 - There is no word completion in the editor.
 
 ## 16. Sharing a workspace with Git

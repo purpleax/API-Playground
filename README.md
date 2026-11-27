@@ -72,6 +72,9 @@ Covered by engine tests:
 - A proxy, its password, and hosts that skip it
 - A WebSocket over TLS presenting a client certificate from PEM files and from a `.p12`
 - Insomnia cookies, and Bruno certificates and proxy settings, read from exports
+- A spec whose server is a path alone, or that lists none, giving a collection with a
+  full base address, and a path value inside a part of the path (`/images/:seed.svg`)
+  being filled in when the request is sent
 
 Checked by hand in the running app:
 
@@ -117,6 +120,13 @@ Checked by hand in the running app:
   The check found two faults in the collection runner, fixed in 0.3.1: a
   gRPC call's status 0 was drawn in red, and a WebSocket request was sent as a failed GET
   where it is now skipped with a note
+- Added in 0.3.3 and 0.3.4, in the test copy, with a JSON spec whose server is `/`: Make
+  Collection saying the spec names no server, Set Address… opening the collection's
+  variables sheet, a change made in that sheet being saved, a route sent from the spec to
+  the address set on the collection, Update Collection keeping that address, and the
+  Environments sheet listing no collections
+- An update from inside the app: a copy of 0.3.3 in Applications found 0.3.4, installed
+  it and reopened as 0.3.4
 
 Not yet checked:
 
@@ -140,7 +150,10 @@ Not yet checked:
   too quickly to watch)
 - A failed gRPC call showing the server's message as the response body (changed after it
   was last looked at)
-- API specs: New API Spec, Import OpenAPI Spec, deleting a spec, a JSON spec and a
+- A collection's variables: the Variables… item in a collection's menu, and typing a new
+  address into the sheet (a tick box changed there was saved, and the address was set in
+  the collection's file)
+- API specs: New API Spec, Import OpenAPI Spec, deleting a spec, a
   Swagger 2.0 spec on screen, Update Collection after editing a spec, and a large real
   spec such as Stripe's or GitHub's
 - Git Sync's "Start Tracking This Vault with Git", Discard, saving the remote address and
@@ -205,7 +218,8 @@ Run the engine tests:
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ```
 
-Build the app into `build/API Playground.app` (quit the app first if it is running):
+Build the app into `build/API Playground.app`. Quit the app first: the script stops if
+that copy is open when it starts, or is opened while it builds, and leaves it as it was.
 
 ```bash
 Scripts/make-app.sh
@@ -292,9 +306,9 @@ Version 0.3.4 followed the same day. It gives a collection's variables a sheet o
 own, apart from the Environments sheet, where listing them made a collection look like an
 environment.
 
-Not checked: an update has never been downloaded and installed, which 0.3.3 is the first
-chance to try from an installed 0.3.2; and the disk image has not been opened on another
-Mac.
+The update feed has now been used: a copy of 0.3.3 in Applications found 0.3.4, installed
+it and reopened as 0.3.4. Not checked: an update from 0.3.2, and the disk image opened on
+another Mac.
 
 ## Layout
 
