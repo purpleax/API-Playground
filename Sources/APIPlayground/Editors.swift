@@ -274,44 +274,40 @@ struct KeyValueEditor: View {
     }
 }
 
-/// The sheet for every variable. A collection's variables are the rows of a table, each
-/// with one value, and every environment is a column of other values for the same names.
-/// With no environments the table is a name and a value, and nothing more.
+/// The sheet for every variable. There are two kinds and no more: the global variables,
+/// which every collection's requests can use, and each collection's own.
 struct VariablesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     enum Scope: Hashable {
-        case collection(UUID)
         case globals
+        case collection(UUID)
     }
 
     @State private var selected = Scope.globals
     /// What `rows` holds at the moment, which is what a save writes back to.
     @State private var loaded: Scope?
-    /// The selected collection's variables, or the globals.
     @State private var rows: [Variable] = []
-    @State private var environments: [APIEnvironment] = []
-    /// For each row, the name its values are filed under in the environments. It follows
-    /// the row's own name once a rename is finished, not letter by letter.
-    @State private var links: [UUID: String] = [:]
 
-    /// The environment whose name is being typed over, if any.
-    @State private var renaming: UUID?
-    @FocusState private var renameFocused: Bool
-
-    private static let nameWidth: CGFloat = 160
-    private static let valueWidth: CGFloat = 220
-    private static let environmentWidth: CGFloat = 180
-    private static let actionsWidth: CGFloat = 104
+    private static let nameWidth: CGFloat = 200
+    private static let valueWidth: CGFloat = 360
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Variables").font(.system(size: 17, weight: .bold))
+                Text("Write {{name}} in a request and it is replaced with the variable's value.")
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Divider()
             HSplitView {
                 list
-                    .frame(minWidth: 190, maxWidth: 230)
+                    .frame(minWidth: 200, maxWidth: 250)
                     .background(Theme.chrome)
                 table
                     .frame(minWidth: 520)
@@ -328,9 +324,8 @@ struct VariablesView: View {
             }
             .padding(12)
         }
-        .frame(width: 1160, height: 580)
+        .frame(width: 980, height: 560)
         .onAppear {
-            environments = model.environments
             if let id = model.variablesCollection, model.collections.contains(where: { $0.id == id }) {
                 // Asked for from a collection: start on that collection.
                 selected = .collection(id)
@@ -354,43 +349,30 @@ struct VariablesView: View {
 
     // MARK: Parts
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Variables").font(.system(size: 17, weight: .bold))
-                Text("Write {{name}} in a request and it is replaced with the variable's value.")
-                    .font(.callout)
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Spacer()
-            if !environments.isEmpty {
-                Text("Requests use")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.textSecondary)
-                MenuPicker(
-                    title: environments.first { $0.id == model.activeEnvironmentID }?.name ?? "No environment",
-                    selection: Binding(get: { model.activeEnvironmentID }, set: { model.activeEnvironmentID = $0 })
-                ) {
-                    Text("No environment").tag(UUID?.none)
-                    ForEach(environments) { environment in
-                        Text(environment.name).tag(UUID?.some(environment.id))
-                    }
-                }
-                .help("The environment whose column of values is used. The same choice as in the top bar.")
-            }
+    private func heading(_ title: String, _ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).sectionTitle()
+            Text(note)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 10)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 
     private var list: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Collections")
-                    .sectionTitle()
-                    .padding(.horizontal, 10)
-                    .padding(.top, 10)
-                    .padding(.bottom, 4)
+                heading("Global", "Used by every collection.")
+                SelectableRow(isSelected: selected == .globals) {
+                    selected = .globals
+                } content: {
+                    Image(systemName: "globe").foregroundStyle(Theme.info).frame(width: 16)
+                    Text("Global variables").font(.system(size: 13))
+                }
+                heading("Collection", "Used by that collection only.")
                 if model.collections.isEmpty {
                     Text("No collections yet.")
                         .font(.system(size: 12))
@@ -407,44 +389,24 @@ struct VariablesView: View {
                             .lineLimit(1)
                     }
                 }
-                Divider().padding(.vertical, 8)
-                SelectableRow(isSelected: selected == .globals) {
-                    selected = .globals
-                } content: {
-                    Image(systemName: "globe").foregroundStyle(Theme.textTertiary).frame(width: 16)
-                    Text("Shared by all collections")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(1)
-                }
             }
             .padding(8)
         }
     }
 
-    private var isCollection: Bool {
-        if case .collection = selected { return true }
-        return false
-    }
-
-    /// Environments are columns in a collection's table. The shared variables have none.
-    private var showsEnvironments: Bool { isCollection && !environments.isEmpty }
-
     private var title: String {
         switch selected {
+        case .globals: return "Global variables"
         case .collection(let id): return model.collections.first { $0.id == id }?.name ?? "Collection"
-        case .globals: return "Shared by all collections"
         }
     }
 
     private var caption: String {
         switch selected {
         case .globals:
-            return "Used by the requests of every collection. A collection's own variable with the same name is used in its place."
+            return "Every collection's requests can use these. If a collection has a variable of its own with the same name, the collection's is used."
         case .collection:
-            return environments.isEmpty
-                ? "Used by every request in this collection. Each variable has one value."
-                : "Used by every request in this collection. The Value column applies unless the environment in use has a value of its own for that variable."
+            return "Only this collection's requests use these. A variable here is used in place of a global one with the same name."
         }
     }
 
@@ -455,30 +417,15 @@ struct VariablesView: View {
                 Text(caption)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ScrollView(.horizontal) {
-                    grid.padding(.bottom, 10)
-                }
-                HStack(spacing: 14) {
-                    Button {
-                        rows.append(Variable())
-                    } label: {
-                        Label("Add Variable", systemImage: "plus")
-                    }
-                    if isCollection {
-                        Button {
-                            environments.append(APIEnvironment(name: VariableTable.newEnvironmentName(among: environments)))
-                        } label: {
-                            Label("Add Environment", systemImage: "plus")
-                        }
-                        .help("An environment is another column of values for these variables, such as one for staging and one for production. You choose which is used.")
-                    }
+                grid
+                Button {
+                    rows.append(Variable())
+                } label: {
+                    Label("Add Variable", systemImage: "plus")
                 }
                 .buttonStyle(GhostButtonStyle())
-                if isCollection, environments.isEmpty {
-                    Text("Talking to more than one server? Add an environment for each, give it its own values, and switch between them.")
-                        .font(.callout)
-                        .foregroundStyle(Theme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if !model.unusedEnvironments.isEmpty {
+                    leftovers.padding(.top, 14)
                 }
             }
             .padding()
@@ -487,20 +434,12 @@ struct VariablesView: View {
     }
 
     private var grid: some View {
-        let extras = showsEnvironments
-            ? VariableTable.names(onlyIn: environments, notAmong: rows.map { filedName($0) })
-            : []
-        return Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 6) {
+        Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 6) {
             GridRow {
                 Color.clear.frame(width: 16, height: 1)
                 columnTitle("Variable").frame(width: Self.nameWidth, alignment: .leading)
                 columnTitle("Value").frame(width: Self.valueWidth, alignment: .leading)
-                Color.clear.frame(width: Self.actionsWidth, height: 1)
-                if showsEnvironments {
-                    ForEach(environments) { environment in
-                        environmentTitle(environmentBinding(environment.id)).frame(width: Self.environmentWidth, alignment: .leading)
-                    }
-                }
+                Color.clear.frame(width: 1, height: 1)
             }
             ForEach(rows) { row in
                 // Reached by its id, not its place in the list, so removing a row cannot
@@ -511,10 +450,8 @@ struct VariablesView: View {
                         .labelsHidden()
                         .toggleStyle(ThemedCheckboxStyle())
                         .help("Untick to leave this variable out without deleting it")
-                    TextField("name", text: entry.key, onEditingChanged: { editing in
-                        if !editing { settleName(of: entry.wrappedValue) }
-                    })
-                    .frame(width: Self.nameWidth)
+                    TextField("name", text: entry.key)
+                        .frame(width: Self.nameWidth)
                     valueField(entry).frame(width: Self.valueWidth)
                     HStack(spacing: 4) {
                         Toggle(isOn: Binding(get: { row.isLocalOnly }, set: { entry.wrappedValue.isLocalOnly = $0 })) {
@@ -531,63 +468,53 @@ struct VariablesView: View {
                         Button {
                             let id = row.id
                             rows.removeAll { $0.id == id }
-                            links[id] = nil
                         } label: {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(GhostButtonStyle())
                         .help("Remove this variable")
                     }
-                    .frame(width: Self.actionsWidth, alignment: .leading)
-                    if showsEnvironments {
-                        ForEach(environments) { environment in
-                            cell(environmentBinding(environment.id), name: filedName(row), secret: row.secret, empty: "Same as value")
-                                .frame(width: Self.environmentWidth)
-                        }
-                    }
                 }
                 .opacity(row.enabled ? 1 : 0.5)
-            }
-            if !extras.isEmpty {
-                GridRow {
-                    Text("Set only in an environment")
-                        .sectionTitle()
-                        .padding(.top, 10)
-                        .gridCellColumns(4 + environments.count)
-                }
-                ForEach(extras, id: \.self) { name in
-                    GridRow {
-                        Color.clear.frame(width: 16, height: 1)
-                        Text(name)
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .frame(width: Self.nameWidth, alignment: .leading)
-                        Button("Give It a Value Here") {
-                            let variable = Variable(key: name)
-                            rows.append(variable)
-                            links[variable.id] = name
-                        }
-                        .buttonStyle(GhostButtonStyle())
-                        .frame(width: Self.valueWidth, alignment: .leading)
-                        .help("Add this variable to the collection, so it has a value when no environment gives it one")
-                        Button {
-                            for index in environments.indices { environments[index].setOverride("", for: name) }
-                        } label: {
-                            Image(systemName: "minus.circle")
-                        }
-                        .buttonStyle(GhostButtonStyle())
-                        .frame(width: Self.actionsWidth, alignment: .trailing)
-                        .help("Remove this variable from every environment")
-                        ForEach(environments) { environment in
-                            cell(environmentBinding(environment.id), name: name, secret: false, empty: "No value")
-                                .frame(width: Self.environmentWidth)
-                        }
-                    }
-                }
             }
         }
         .textFieldStyle(ThemedTextFieldStyle())
         .font(.system(.body, design: .monospaced))
+    }
+
+    /// Environments left in the workspace by an earlier version of the app. They are not used
+    /// any more, and each can be added to a collection or deleted.
+    private var leftovers: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Environments from an earlier version").sectionTitle()
+            Text("Environments are no longer used. Add each one's variables to the collection it was for, or delete it.")
+                .font(.callout)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(model.unusedEnvironments) { environment in
+                HStack(spacing: 10) {
+                    Text(environment.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    Text("\(environment.variables.count) \(environment.variables.count == 1 ? "variable" : "variables")")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textTertiary)
+                    Spacer()
+                    Menu("Add to a Collection") {
+                        ForEach(model.collections) { collection in
+                            Button(collection.name) { adopt(environment, into: collection.id) }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(model.collections.isEmpty)
+                    Button("Delete", role: .destructive) { model.deleteEnvironment(environment.id) }
+                        .buttonStyle(GhostButtonStyle())
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.smallRadius))
+            }
+        }
     }
 
     private func columnTitle(_ text: String) -> some View {
@@ -596,96 +523,15 @@ struct VariablesView: View {
             .foregroundStyle(Theme.textSecondary)
     }
 
-    /// An environment's column heading: its name, whether it is in use, and what can be done with it.
-    private func environmentTitle(_ environment: Binding<APIEnvironment>) -> some View {
-        let id = environment.wrappedValue.id
-        let inUse = model.activeEnvironmentID == id
-        return HStack(spacing: 5) {
-            if renaming == id {
-                TextField("Environment name", text: environment.name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, weight: .semibold))
-                    .focused($renameFocused)
-                    .onSubmit { renaming = nil }
-                    .onChange(of: renameFocused) { _, focused in
-                        if !focused { renaming = nil }
-                    }
-            } else {
-                Text(environment.wrappedValue.name.isEmpty ? "Untitled" : environment.wrappedValue.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(inUse ? Theme.accent : Theme.textSecondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if inUse {
-                Text("In use")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                    .fixedSize()
-            }
-            Menu {
-                Button(inUse ? "Stop Using This Environment" : "Use This Environment") {
-                    model.activeEnvironmentID = inUse ? nil : id
-                }
-                Button("Rename") {
-                    renaming = id
-                    renameFocused = true
-                }
-                Divider()
-                Button("Delete Environment", role: .destructive) {
-                    environments.removeAll { $0.id == id }
-                    model.deleteEnvironment(id)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 20, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Use, rename or delete this environment")
-        }
-    }
-
-    private func masks(_ name: String, secret: Bool) -> Bool {
-        secret || (model.secretsHidden && Redactor.isSensitiveName(name))
-    }
-
     @ViewBuilder
     private func valueField(_ row: Binding<Variable>) -> some View {
         let text = Binding(get: { row.wrappedValue.shownValue }, set: { row.wrappedValue.shownValue = $0 })
-        if masks(row.wrappedValue.key, secret: row.wrappedValue.secret) {
+        if row.wrappedValue.secret || (model.secretsHidden && Redactor.isSensitiveName(row.wrappedValue.key)) {
             SecureField("value", text: text)
         } else {
             TextField("value", text: text)
         }
     }
-
-    /// One environment's value for one variable. Emptying it takes the value away.
-    @ViewBuilder
-    private func cell(_ environment: Binding<APIEnvironment>, name: String, secret: Bool, empty: String) -> some View {
-        let existing = environment.wrappedValue.override(named: name)
-        let text = Binding(
-            get: { environment.wrappedValue.override(named: name)?.shownValue ?? "" },
-            set: { environment.wrappedValue.setOverride($0, for: name, secret: secret) }
-        )
-        Group {
-            if masks(name, secret: existing?.secret ?? secret) {
-                SecureField(empty, text: text)
-            } else {
-                TextField(empty, text: text)
-            }
-        }
-        .disabled(name.isEmpty)
-        .opacity(existing?.enabled == false ? 0.5 : 1)
-        .help(existing?.enabled == false ? "Switched off in this environment. Typing here switches it back on." : "")
-    }
-
-    // MARK: Reaching a row or an environment by its id
 
     private func rowBinding(_ id: UUID) -> Binding<Variable> {
         Binding(
@@ -696,39 +542,6 @@ struct VariablesView: View {
         )
     }
 
-    private func environmentBinding(_ id: UUID) -> Binding<APIEnvironment> {
-        Binding(
-            get: { environments.first { $0.id == id } ?? APIEnvironment(id: id, name: "") },
-            set: { new in
-                if let index = environments.firstIndex(where: { $0.id == id }) { environments[index] = new }
-            }
-        )
-    }
-
-    // MARK: Names
-
-    /// The name a row's environment values are filed under.
-    private func filedName(_ row: Variable) -> String {
-        links[row.id] ?? row.key
-    }
-
-    /// After a variable is renamed, moves its values in the environments to the new name,
-    /// unless another collection still uses the old one or the new one is taken.
-    private func settleName(of row: Variable) {
-        let new = row.key
-        guard !new.isEmpty else { return }
-        if isCollection, let old = links[row.id], old != new {
-            let usedElsewhere = model.collections.contains { collection in
-                Scope.collection(collection.id) != selected && collection.variables.contains { $0.key == old }
-            }
-            let taken = environments.contains { $0.override(named: new) != nil }
-            if !usedElsewhere, !taken {
-                for index in environments.indices { environments[index].renameVariable(old, to: new) }
-            }
-        }
-        links[row.id] = new
-    }
-
     // MARK: Loading and saving
 
     private func load(_ scope: Scope) {
@@ -736,15 +549,12 @@ struct VariablesView: View {
         case .collection(let id): rows = model.collections.first { $0.id == id }?.variables ?? []
         case .globals: rows = model.globals
         }
-        links = [:]
-        for row in rows where !row.key.isEmpty { links[row.id] = row.key }
         loaded = scope
     }
 
-    /// Writes back what has changed: the rows to where they came from, and the environments.
+    /// Writes the rows back to where they came from, if they have changed.
     private func save() {
         guard let loaded else { return }
-        for row in rows { settleName(of: row) }
         // A row that was added and left blank is not a variable.
         rows.removeAll { $0.key.isEmpty && $0.shownValue.isEmpty }
         switch loaded {
@@ -753,8 +563,72 @@ struct VariablesView: View {
         case .globals:
             if rows != model.globals { model.saveGlobals(rows) }
         }
-        for environment in environments where model.environments.first(where: { $0.id == environment.id }) != environment {
-            model.saveEnvironment(environment)
+    }
+
+    /// Adds a leftover environment's variables to a collection, and shows them if that
+    /// collection is the one on screen.
+    private func adopt(_ environment: APIEnvironment, into collectionID: UUID) {
+        save()
+        model.adopt(environment, into: collectionID)
+        if let loaded { load(loaded) }
+    }
+}
+
+/// Asks which collection an imported environment's variables should be added to. A
+/// collection has one set of variables, so an environment from Postman or another app
+/// joins a collection instead of standing on its own.
+struct EnvironmentDestinationView: View {
+    @Environment(AppModel.self) private var model
+    let pending: PendingEnvironment
+
+    @State private var choice: EnvironmentDestination = .newCollection
+
+    var body: some View {
+        let count = pending.environment.variables.count
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Add “\(pending.environment.name)” to which collection?")
+                    .font(.system(size: 17, weight: .bold))
+                Text("This environment has \(count) \(count == 1 ? "variable" : "variables"). They are added to the collection's own variables, and one with the same name is replaced.")
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.collections) { collection in
+                        SelectableRow(isSelected: choice == .collection(collection.id)) {
+                            choice = .collection(collection.id)
+                        } content: {
+                            Image(systemName: "folder").foregroundStyle(Theme.textSecondary).frame(width: 16)
+                            Text(collection.name).font(.system(size: 13)).lineLimit(1)
+                        }
+                    }
+                    SelectableRow(isSelected: choice == .newCollection) {
+                        choice = .newCollection
+                    } content: {
+                        Image(systemName: "plus").foregroundStyle(Theme.textSecondary).frame(width: 16)
+                        Text("A new collection named “\(pending.environment.name)”").font(.system(size: 13)).lineLimit(1)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(minHeight: 120, maxHeight: 260)
+            Divider()
+            HStack {
+                Button("Don’t Import It") { model.resolvePendingEnvironment(.skip) }
+                    .buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                Button("Add") { model.resolvePendingEnvironment(choice) }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 520)
+        .onAppear {
+            if let suggested = model.suggestedCollectionForImport { choice = .collection(suggested) }
         }
     }
 }

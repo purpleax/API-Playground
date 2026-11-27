@@ -1,8 +1,7 @@
 import Foundation
 
-// The Variables sheet shows a collection's variables as rows, with one value each, and
-// every environment as a column of other values for the same names. These are the rules
-// behind that table, kept here so they can be tested without the app.
+// The Variables sheet shows each variable with one value. These are the rules behind
+// that, kept here so they can be tested without the app.
 
 extension Variable {
     /// The one value the table shows and edits: the value requests use.
@@ -40,62 +39,24 @@ extension Variable {
     }
 }
 
-extension APIEnvironment {
-    /// The value this environment has of its own for a name, if any.
-    public func override(named name: String) -> Variable? {
-        guard !name.isEmpty else { return nil }
-        return variables.first { $0.key == name }
-    }
-
-    /// Gives a variable a value of its own in this environment. Empty text takes that value
-    /// away, so the collection's value applies again.
-    /// - Parameter secret: Whether a value added here should be secret, as the collection's is.
-    public mutating func setOverride(_ text: String, for name: String, secret: Bool = false) {
-        guard !name.isEmpty else { return }
-        if text.isEmpty {
-            variables.removeAll { $0.key == name }
-        } else if let index = variables.firstIndex(where: { $0.key == name }) {
-            variables[index].shownValue = text
-            variables[index].enabled = true
-        } else {
-            variables.append(Variable(key: name, value: text, secret: secret))
-        }
-    }
-
-    /// Renames a variable, so its value here follows a variable renamed in the table.
-    /// Nothing changes when the new name is already taken in this environment.
-    /// - Returns: False when the new name was taken.
+extension APICollection {
+    /// Takes an environment's variables into the collection's own, which is how an
+    /// environment from Postman or another app is imported: a collection has one set of
+    /// variables. A variable with the same name is replaced, as an environment's value
+    /// would have been used in place of the collection's.
+    /// - Returns: How many variables were added and how many replaced.
     @discardableResult
-    public mutating func renameVariable(_ old: String, to new: String) -> Bool {
-        guard !old.isEmpty, !new.isEmpty, old != new else { return true }
-        guard override(named: new) == nil else { return false }
-        for index in variables.indices where variables[index].key == old { variables[index].key = new }
-        return true
-    }
-}
-
-public enum VariableTable {
-    /// The names that have a value in some environment but are not among the given names,
-    /// in the order they are first met. The table lists them under the collection's own rows.
-    public static func names(onlyIn environments: [APIEnvironment], notAmong names: [String]) -> [String] {
-        var seen = Set(names)
-        var out: [String] = []
-        for environment in environments {
-            for variable in environment.variables where !variable.key.isEmpty && !seen.contains(variable.key) {
-                seen.insert(variable.key)
-                out.append(variable.key)
+    public mutating func adopt(_ environment: APIEnvironment) -> (added: Int, replaced: Int) {
+        var added = 0, replaced = 0
+        for variable in environment.variables where !variable.key.isEmpty {
+            if let index = variables.firstIndex(where: { $0.key == variable.key }) {
+                variables[index] = variable
+                replaced += 1
+            } else {
+                variables.append(variable)
+                added += 1
             }
         }
-        return out
-    }
-
-    /// A name for a new environment that no other has: "New Environment", then "New Environment 2".
-    public static func newEnvironmentName(among environments: [APIEnvironment]) -> String {
-        let taken = Set(environments.map(\.name))
-        let base = "New Environment"
-        guard taken.contains(base) else { return base }
-        var counter = 2
-        while taken.contains("\(base) \(counter)") { counter += 1 }
-        return "\(base) \(counter)"
+        return (added, replaced)
     }
 }

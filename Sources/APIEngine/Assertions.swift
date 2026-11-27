@@ -246,14 +246,22 @@ public struct Assertion: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Where a saved value goes. There are two places: the collection the request is in, and
+/// the globals every collection shares. `environment` is kept so that files and scripts
+/// written for Postman still read; it means the collection.
 public enum VariableScopeKind: String, Codable, CaseIterable, Sendable {
     case environment, collection, globals
 
+    /// The two places to choose between.
+    public static let choices: [VariableScopeKind] = [.collection, .globals]
+
+    /// The place this really is: the collection, for `environment`.
+    public var place: VariableScopeKind { self == .globals ? .globals : .collection }
+
     public var label: String {
-        switch self {
-        case .environment: return "Environment"
-        case .collection: return "Collection"
-        case .globals: return "Globals"
+        switch place {
+        case .globals: return "Global"
+        default: return "Collection"
         }
     }
 }
@@ -268,7 +276,7 @@ public struct Extraction: Codable, Hashable, Identifiable, Sendable {
 
     enum CodingKeys: String, CodingKey { case variable, source, scope, enabled }
 
-    public init(variable: String = "", source: ValueSource = ValueSource(kind: .json, path: "$."), scope: VariableScopeKind = .environment, enabled: Bool = true) {
+    public init(variable: String = "", source: ValueSource = ValueSource(kind: .json, path: "$."), scope: VariableScopeKind = .collection, enabled: Bool = true) {
         self.variable = variable
         self.source = source
         self.scope = scope
@@ -297,6 +305,8 @@ public struct Extraction: Codable, Hashable, Identifiable, Sendable {
 public struct RunState: Equatable, Sendable {
     public var globals: [Variable]
     public var collectionVariables: [Variable]
+    /// Values that stand in front of the collection's for the length of a run. Nothing saves
+    /// into these: the mock server uses them to point a collection at itself.
     public var environment: [Variable]
     /// Variables set with `pm.variables.set`. They last for one run and are never saved.
     public var locals: [String: String] = [:]
@@ -338,17 +348,18 @@ public struct RunState: Equatable, Sendable {
                 variables.append(Variable(key: name, value: "", currentValue: value))
             }
         }
+        // There are two places a value can be saved: the collection and the globals. What
+        // Postman calls the environment is the collection's variables here, so a script or
+        // rule that saves "to the environment" saves to the collection.
         switch scope {
-        case .environment: update(&environment)
-        case .collection: update(&collectionVariables)
+        case .environment, .collection: update(&collectionVariables)
         case .globals: update(&globals)
         }
     }
 
     public mutating func unset(_ name: String, scope: VariableScopeKind) {
         switch scope {
-        case .environment: environment.removeAll { $0.key == name }
-        case .collection: collectionVariables.removeAll { $0.key == name }
+        case .environment, .collection: collectionVariables.removeAll { $0.key == name }
         case .globals: globals.removeAll { $0.key == name }
         }
     }

@@ -77,40 +77,6 @@ struct CollectionQuery: EntityStringQuery {
     }
 }
 
-struct EnvironmentEntity: AppEntity {
-    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Environment")
-    static let defaultQuery = EnvironmentQuery()
-
-    var id: UUID
-    var name: String
-
-    var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)")
-    }
-}
-
-struct EnvironmentQuery: EntityStringQuery {
-    @MainActor
-    private func all() -> [EnvironmentEntity] {
-        AppModel.shared.environments.map { EnvironmentEntity(id: $0.id, name: $0.name) }
-    }
-
-    @MainActor
-    func entities(for identifiers: [UUID]) async throws -> [EnvironmentEntity] {
-        all().filter { identifiers.contains($0.id) }
-    }
-
-    @MainActor
-    func entities(matching string: String) async throws -> [EnvironmentEntity] {
-        all().filter { $0.name.localizedCaseInsensitiveContains(string) }
-    }
-
-    @MainActor
-    func suggestedEntities() async throws -> [EnvironmentEntity] {
-        all()
-    }
-}
-
 /// Why an action could not finish, in words Shortcuts shows to the user.
 struct ShortcutError: Error, CustomLocalizedStringResourceConvertible {
     var message: String
@@ -127,22 +93,18 @@ struct SendRequestIntent: AppIntent {
     @Parameter(title: "Request")
     var request: RequestEntity
 
-    @Parameter(title: "Environment", description: "The environment to send it in. Leave empty to use the one that is active in the app.")
-    var environment: EnvironmentEntity?
-
     @Parameter(title: "Fail on an Error Status", description: "Stop the shortcut when the server answers with a 4xx or 5xx status, or a test fails.", default: false)
     var failOnError: Bool
 
     static var parameterSummary: some ParameterSummary {
         Summary("Send \(\.$request)") {
-            \.$environment
             \.$failOnError
         }
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        guard let result = await AppModel.shared.sendAndWait(request.id, environmentID: environment?.id) else {
+        guard let result = await AppModel.shared.sendAndWait(request.id) else {
             throw ShortcutError(message: "\"\(request.name)\" is no longer in the workspace.")
         }
         guard let response = result.response else {
@@ -215,27 +177,6 @@ struct StopMockServerIntent: AppIntent {
         let wasRunning = AppModel.shared.mock != nil
         AppModel.shared.stopMock()
         return .result(dialog: wasRunning ? "The mock server has stopped" : "No mock server was running")
-    }
-}
-
-struct SetEnvironmentIntent: AppIntent {
-    static let title: LocalizedStringResource = "Set Environment"
-    static let description = IntentDescription(
-        "Chooses the environment whose variables fill in requests. Leave it empty for no environment.",
-        categoryName: "Requests"
-    )
-
-    @Parameter(title: "Environment")
-    var environment: EnvironmentEntity?
-
-    static var parameterSummary: some ParameterSummary {
-        Summary("Use the environment \(\.$environment)")
-    }
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        AppModel.shared.activeEnvironmentID = environment?.id
-        return .result(dialog: environment.map { "Using \($0.name)" } ?? "Using no environment")
     }
 }
 

@@ -95,10 +95,6 @@ struct APIPlaygroundApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(!canExportSelection)
-                Button("Compare Across Environments…") {
-                    if let id = model.selection { model.openComparison(id) }
-                }
-                .disabled(model.selection == nil || model.environments.isEmpty)
                 Divider()
                 Button("Copy as cURL") {
                     if let id = model.selection { model.copySnippet(id, language: .curl) }
@@ -204,7 +200,7 @@ struct APIPlaygroundApp: App {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Use Folder"
-        panel.message = "Choose a folder to keep collections and environments in."
+        panel.message = "Choose a folder to keep collections in."
         if panel.runModal() == .OK, let url = panel.url {
             model.openVault(url)
         }
@@ -376,15 +372,15 @@ struct ContentView: View {
                     .themedSheet()
             }
         }
-        .sheet(isPresented: Binding(
-            get: { model.environmentComparison != nil },
-            set: { isShown in
-                if !isShown { model.environmentComparison = nil }
-            }
-        )) {
-            EnvironmentCompareView()
+        .sheet(item: Binding(
+            get: { model.pendingEnvironments.first },
+            // Closing the question without answering it leaves that environment out.
+            set: { if $0 == nil, !model.pendingEnvironments.isEmpty { model.resolvePendingEnvironment(.skip) } }
+        )) { pending in
+            EnvironmentDestinationView(pending: pending)
                 .environment(model)
                 .themedSheet()
+                .interactiveDismissDisabled()
         }
         .sheet(isPresented: $model.showingClientCertificates) {
             ClientCertificatesView()
@@ -485,16 +481,13 @@ struct TopBar: View {
                 .help("The mock server is running. Click to see its routes and requests.")
             }
 
-            // With no environments there is nothing to choose between, so nothing is shown.
-            if !model.environments.isEmpty { environmentMenu }
-
             IconButton(systemImage: "command", active: model.showingPalette, help: "Command palette: go to a request or run a command (⌘K)") {
                 model.showingPalette.toggle()
             }
             IconButton(systemImage: "paintpalette", help: "Choose a colour theme") {
                 model.showingAppearance = true
             }
-            IconButton(systemImage: "slider.horizontal.3", help: "Variables and environments (⌘E)") {
+            IconButton(systemImage: "slider.horizontal.3", help: "Variables: global, and each collection's own (⌘E)") {
                 model.showingEnvironments = true
             }
             IconButton(systemImage: model.hideSecrets ? "eye.slash.fill" : "eye", active: model.hideSecrets,
@@ -513,52 +506,6 @@ struct TopBar: View {
         }
     }
 
-    private var environmentMenu: some View {
-        Menu {
-            Button {
-                model.activeEnvironmentID = nil
-            } label: {
-                if model.activeEnvironmentID == nil { Label("No Environment", systemImage: "checkmark") } else { Text("No Environment") }
-            }
-            if !model.environments.isEmpty { Divider() }
-            ForEach(model.environments) { environment in
-                Button {
-                    model.activeEnvironmentID = environment.id
-                } label: {
-                    if model.activeEnvironmentID == environment.id {
-                        Label(environment.name, systemImage: "checkmark")
-                    } else {
-                        Text(environment.name)
-                    }
-                }
-            }
-            Divider()
-            Button("Edit Variables…") { model.showingEnvironments = true }
-        } label: {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(model.activeEnvironment == nil ? Theme.textTertiary : Theme.accent)
-                    .frame(width: 7, height: 7)
-                Text(model.activeEnvironment?.name ?? "No Environment")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8.5, weight: .bold))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .background(Theme.raised, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.stroke))
-            .contentShape(Capsule())
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("The environment whose variables fill in {{placeholders}}")
-    }
 }
 
 extension AppModel {

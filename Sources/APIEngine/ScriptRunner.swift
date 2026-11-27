@@ -222,8 +222,10 @@ public enum ScriptRunner {
       variables.get = lookup;
       variables.has = function (k) { return lookup(k) !== undefined; };
       variables.replaceIn = replaceIn;
-      var environment = Scope(host.environment), globals = Scope(host.globals), collectionVariables = Scope(host.collection);
-      environment.replaceIn = globals.replaceIn = collectionVariables.replaceIn = replaceIn;
+      // pm.environment and pm.collectionVariables are two names for the collection's
+      // variables: there is no separate environment to save into.
+      var globals = Scope(host.globals), collectionVariables = Scope(host.collection), environment = collectionVariables;
+      globals.replaceIn = collectionVariables.replaceIn = replaceIn;
       environment.name = '';
 
       // ---- headers ----

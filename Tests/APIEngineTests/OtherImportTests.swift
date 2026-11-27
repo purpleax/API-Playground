@@ -387,7 +387,7 @@ environments:
         )
         #expect(outcome.error == nil)
         #expect(outcome.tests.map(\.passed) == [true])
-        #expect(state.environment.first { $0.key == "seen" }?.effectiveValue == "yes")
+        #expect(state.collectionVariables.first { $0.key == "seen" }?.effectiveValue == "yes")
     }
 }
 
@@ -1069,7 +1069,7 @@ docs {
         )
         #expect(post.error == nil)
         #expect(post.tests.map(\.passed) == [true, false])
-        #expect(state.environment.first { $0.key == "first" }?.effectiveValue == "Rex")
+        #expect(state.collectionVariables.first { $0.key == "first" }?.effectiveValue == "Rex")
 
         let unsupported = ScriptRunner.run(
             scripts: ["bru.sleep(10);"], phase: .preRequest, requestName: "Sample", state: &state, request: &request

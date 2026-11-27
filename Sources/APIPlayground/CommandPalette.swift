@@ -7,7 +7,7 @@ struct PaletteItem: Identifiable {
     var title: String
     var detail: String = ""
     var systemImage: String
-    /// The kind of item, shown at the right: "Request", "Environment" and so on.
+    /// The kind of item, shown at the right: "Request", "Action" and so on.
     var kind: String
     /// A method to show as a coloured badge, for requests.
     var method: String?
@@ -55,9 +55,6 @@ extension AppModel {
                 action("Copy as Code…", "curlybraces", detail: request.name) { [weak self] in self?.showingSnippet = id }
                 action("Repeat Request…", "repeat", detail: "Send it many times and measure the response time") { [weak self] in self?.openRepeat(id) }
             }
-            if !environments.isEmpty {
-                action("Compare Across Environments…", "arrow.left.arrow.right", detail: request.name) { [weak self] in self?.openComparison(id) }
-            }
             action("Present Request", "play.rectangle", detail: request.name) { [weak self] in self?.presentSelection() }
         }
 
@@ -87,15 +84,7 @@ extension AppModel {
             action("Stop Mock Server", "stop.fill", detail: "\(session.collectionName) on port \(session.port)", kind: "Mock") { [weak self] in self?.stopMock() }
         }
 
-        for environment in environments where environment.id != activeEnvironmentID {
-            action("Use \(environment.name)", "circle.grid.2x1", kind: "Environment") { [weak self] in
-                self?.activeEnvironmentID = environment.id
-            }
-        }
-        if activeEnvironmentID != nil {
-            action("Use No Environment", "circle.dashed", kind: "Environment") { [weak self] in self?.activeEnvironmentID = nil }
-        }
-        action("Edit Variables…", "slider.horizontal.3", detail: "Each collection's variables, and environments") { [weak self] in self?.showingEnvironments = true }
+        action("Edit Variables…", "slider.horizontal.3", detail: "Global variables, and each collection's own") { [weak self] in self?.showingEnvironments = true }
         action("Cookies…", "circle.hexagongrid") { [weak self] in self?.showingCookies = true }
         action("Proxy and Certificates…", "person.badge.key") { [weak self] in self?.showingClientCertificates = true }
         action(hideSecrets ? "Show Secrets" : "Hide Secrets", hideSecrets ? "eye" : "eye.slash") { [weak self] in self?.hideSecrets.toggle() }

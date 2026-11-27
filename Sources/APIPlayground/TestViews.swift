@@ -103,11 +103,14 @@ struct TestsEditor: View {
                             .foregroundStyle(Theme.textSecondary)
                         TextField("Variable name", text: $extraction.variable)
                             .frame(minWidth: 90)
-                        MenuPicker(title: extraction.scope.label, selection: $extraction.scope) {
-                            ForEach(VariableScopeKind.allCases, id: \.self) { scope in
+                        MenuPicker(title: extraction.scope.label, selection: Binding(
+                            get: { extraction.scope.place }, set: { extraction.scope = $0 }
+                        )) {
+                            ForEach(VariableScopeKind.choices, id: \.self) { scope in
                                 Text(scope.label).tag(scope)
                             }
                         }
+                        .help("Where the value is saved: this collection's variables, or the global ones")
                         .labelsHidden()
                         .fixedSize()
                         Spacer(minLength: 0)

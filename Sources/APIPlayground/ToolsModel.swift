@@ -19,74 +19,21 @@ struct RepeatSession: Identifiable {
     var stats: LatencyStats { LatencyStats(samples) }
 }
 
-/// One request sent in two environments, to see what differs.
-struct EnvironmentComparison: Identifiable {
+/// An environment that has been imported and is waiting to be told which collection it joins.
+struct PendingEnvironment: Identifiable {
     let id = UUID()
-    var requestID: UUID
-    var name: String
-    /// The two environments. Nil stands for "No Environment".
-    var leftID: UUID?
-    var rightID: UUID?
-    var left: RequestRunResult?
-    var right: RequestRunResult?
-    var isRunning = false
+    var environment: APIEnvironment
+    var warnings: [String]
+}
+
+/// Where an imported environment's variables go.
+enum EnvironmentDestination: Hashable {
+    case collection(UUID)
+    case newCollection
+    case skip
 }
 
 extension AppModel {
-    // MARK: Comparing across environments
-
-    func openComparison(_ requestID: UUID) {
-        guard let request = request(requestID) else { return }
-        let other = environments.first { $0.id != activeEnvironmentID }?.id
-        environmentComparison = EnvironmentComparison(
-            requestID: requestID, name: request.name, leftID: activeEnvironmentID, rightID: other
-        )
-    }
-
-    func environmentName(_ id: UUID?) -> String {
-        environments.first { $0.id == id }?.name ?? "No Environment"
-    }
-
-    /// Sends the request once in each environment, at the same time. Nothing is saved from
-    /// either send: no variables, no cookies and no history.
-    func runComparison() {
-        guard var comparison = environmentComparison, !comparison.isRunning,
-              let index = collectionIndex(containingRequest: comparison.requestID),
-              let request = collections[index].request(id: comparison.requestID) else { return }
-        comparison.isRunning = true
-        comparison.left = nil
-        comparison.right = nil
-        environmentComparison = comparison
-        let collection = collections[index]
-        let executor = executor
-        func state(_ id: UUID?) -> RunState {
-            var state = RunState(
-                globals: globals, collectionVariables: collection.variables,
-                environment: environments.first { $0.id == id }?.variables ?? []
-            )
-            state.cookies = cookieJar
-            return state
-        }
-        let leftState = state(comparison.leftID)
-        let rightState = state(comparison.rightID)
-        let comparisonID = comparison.id
-        Task {
-            async let left: RequestRunResult = {
-                var state = leftState
-                return await executor.run(request, in: collection, state: &state)
-            }()
-            async let right: RequestRunResult = {
-                var state = rightState
-                return await executor.run(request, in: collection, state: &state)
-            }()
-            let results = await (left, right)
-            guard environmentComparison?.id == comparisonID else { return }
-            environmentComparison?.left = results.0
-            environmentComparison?.right = results.1
-            environmentComparison?.isRunning = false
-        }
-    }
-
     // MARK: Copying a request as code
 
     /// The request as it would be sent now, with a stored OAuth 2 token and cookies applied,
@@ -314,12 +261,9 @@ extension AppModel {
 
     // MARK: For Shortcuts and the menu bar
 
-    /// Sends a request and waits for the result, as the Send button would, optionally in another environment.
-    func sendAndWait(_ id: UUID, environmentID: UUID? = nil) async -> RequestRunResult? {
+    /// Sends a request and waits for the result, as the Send button would.
+    func sendAndWait(_ id: UUID) async -> RequestRunResult? {
         guard let index = collectionIndex(containingRequest: id), let request = collections[index].request(id: id) else { return nil }
-        let previous = activeEnvironmentID
-        if let environmentID, environments.contains(where: { $0.id == environmentID }) { activeEnvironmentID = environmentID }
-        defer { if activeEnvironmentID != previous { activeEnvironmentID = previous } }
         let collection = collections[index]
         var initial = RunState(
             globals: globals, collectionVariables: collection.variables, environment: activeEnvironment?.variables ?? []
@@ -328,7 +272,6 @@ extension AppModel {
         var state = initial
         responses[id] = .sending
         let result = await executor.run(request, in: collection, state: &state)
-        // Variables a script saved belong to the environment the request ran in.
         saveRun(state, since: initial, collectionID: collection.id)
         record(result)
         return result

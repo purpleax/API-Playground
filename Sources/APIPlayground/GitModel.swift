@@ -210,7 +210,7 @@ extension AppModel {
 
     func commit(_ message: String) async -> Bool {
         guard mock == nil else {
-            report("Stop the mock server before committing. While it runs it keeps a temporary environment in the workspace.", isError: true)
+            report("Stop the mock server before committing. While it runs it keeps a temporary file in the workspace.", isError: true)
             return false
         }
         let done: Void? = await gitRun("Committing…") { try $0.commitAll(message: message) }

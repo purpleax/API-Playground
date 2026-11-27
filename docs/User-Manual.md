@@ -13,7 +13,7 @@ This manual describes version 0.3.4.
 3. [Where your work is kept](#3-where-your-work-is-kept)
 4. [Bringing in existing work](#4-bringing-in-existing-work)
 5. [Requests](#5-requests)
-6. [Variables and environments](#6-variables-and-environments)
+6. [Variables](#6-variables)
 7. [Authentication](#7-authentication)
 8. [Reading a response](#8-reading-a-response)
 9. [Testing](#9-testing)
@@ -52,16 +52,15 @@ newer download by hand.
   Params, Headers, Body, Auth, Tests and Scripts.
 - **Response** (right): the status, size and time, with tabs for the body, headers and
   more. See [Reading a response](#8-reading-a-response).
-- **Top bar**: the name of the workspace, the environment switcher once you have an
-  environment, and buttons for the command palette, the theme, the Variables sheet, Hide
-  Secrets and the mock server.
+- **Top bar**: the name of the workspace, and buttons for the command palette, the theme,
+  the Variables sheet, Hide Secrets and the mock server.
 
 **⌘K** opens the command palette, which finds any request or command by typing part of
 its name.
 
 ## 3. Where your work is kept
 
-A workspace is a folder of plain files: one for each request, folder and environment. The
+A workspace is a folder of plain files: one for each request and folder. The
 app can work in three ways.
 
 | Mode | What it is | How to choose it |
@@ -80,7 +79,7 @@ app each file came from. Dropping files on the app's icon does the same.
 
 | From | What to choose |
 |---|---|
-| Postman | A collection or environment file, a backup file, or the zip from "Export Data" |
+| Postman | A collection, environment or globals file, a backup file, or the zip from "Export Data" |
 | Insomnia | An export file, JSON or YAML (format 4), or a collection's YAML file (format 5) |
 | Bruno | The collection's folder, one `.bru` file, or the JSON from "Export collection" |
 
@@ -93,9 +92,10 @@ export has nothing to recognise it by, so importing it again makes a second coll
 
 ### How things from other apps are converted
 
-- **Insomnia's base environment** becomes the collection's variables, and each
-  sub-environment becomes an environment. Nested values become one variable for each
-  leaf, so `{{ _.user.name }}` becomes `{{user.name}}`.
+- **An environment** from any of the three is added to a collection's own variables. The
+  app asks which collection. See [Variables](#6-variables).
+- **Insomnia's base environment** becomes the collection's variables. Nested values
+  become one variable for each leaf, so `{{ _.user.name }}` becomes `{{user.name}}`.
 - **Insomnia's response tag** (`{% response ... %}`), which reads a value from another
   request's last response, becomes a "Save from response" rule on that request and a
   variable. Unlike Insomnia, the other request is not sent for you: send it first.
@@ -150,35 +150,27 @@ whole part of the address or sit inside one, as in `/images/:seed.svg` or `/v:ve
 
 A request waits up to 30 seconds for a response. Event streams are not cut off.
 
-## 6. Variables and environments
+## 6. Variables
 
 A variable is a name with a value. Write `{{name}}` in an address, a header, a body or
 an auth field, and it is replaced with the value when the request is sent.
 
+There are two kinds, and no more:
+
+| Kind | Used by |
+|---|---|
+| **Global variables** | Every collection's requests |
+| **Collection variables** | The requests of that one collection |
+
+When a collection has a variable with the same name as a global one, the collection's is
+used. There are no environments to switch between: a collection has one set of variables.
+
 **Request > Variables… (⌘E)** opens the Variables sheet on the collection you are working
-in. Right-clicking a collection and choosing **Variables…** opens it on that collection.
+in. Its list has **Global variables** at the top and each collection below.
+Right-clicking a collection and choosing **Variables…** opens it on that collection.
 
-**A collection's variables** are a table: a name and a value on each row. Every request in
-the collection can use them. **Add Variable** adds a row.
-
-**Environments** are for talking to more than one server, such as staging and production.
-An environment is another column in the same table: for any variable it can hold a
-different value, and a cell left empty means "same as the Value column". **Add
-Environment** adds a column. Only one environment is used at a time. Choose it with
-**Requests use** at the top of the sheet or with the switcher in the top bar, which
-appears once there is an environment. Its column is marked "In use". With no environment
-chosen, the Value column is used for everything. The **…** on a column heading uses,
-renames or deletes that environment.
-
-An environment belongs to the workspace, not to one collection, so its columns appear in
-every collection's table. A variable that has a value in an environment but is not one of
-the collection's own is listed under "Set only in an environment".
-
-**Shared by all collections**, at the bottom of the list, holds variables every
-collection can use (Postman's globals). A collection's own variable with the same name is
-used in its place.
-
-Beside each value are three buttons:
+Each row is a name and a value. **Add Variable** adds a row, and unticking a row leaves
+the variable out without deleting it. Beside each value are three buttons:
 
 - **This Mac only** (the laptop): keeps the value on your Mac and out of the workspace, so
   it is not shared and stays out of Git. A value saved from a response starts this way.
@@ -186,7 +178,14 @@ Beside each value are three buttons:
   Keychain, not in a file, and is masked on screen.
 - **Remove** (the minus).
 
-Unticking a row leaves the variable out without deleting it.
+**Environments from other apps.** Postman, Insomnia and Bruno have environments. When
+one is imported, the app asks which collection it is for and adds its variables to that
+collection's own, replacing any with the same name. You can also put it in a new
+collection, or leave it out.
+
+**Environments from an earlier version.** Versions up to 0.3.4 had environments of their
+own. If a workspace still holds some, the Variables sheet lists them at the bottom, where
+each can be added to a collection or deleted. They are not used until then.
 
 These names are filled in for you each time a request is sent: `{{$guid}}` and
 `{{$randomUUID}}` (a new UUID), `{{$timestamp}}` (seconds since 1970),
@@ -243,10 +242,6 @@ opened to read their claims and expiry. Signatures are not checked.
 **History and differences.** Every response is kept. Choose an older one in the History
 tab to see the lines that changed between it and the current response.
 
-**Comparing environments.** **Request > Compare Across Environments…** sends the request
-once in each of two environments and shows both statuses and the lines that differ
-between the two bodies. Nothing from it is saved.
-
 ## 9. Testing
 
 ### Checks
@@ -297,6 +292,10 @@ Not supported, and reported as a script error when used:
 - From Bruno: `await`, `bru.sendRequest`, `bru.runRequest`, `bru.sleep` and `res('path')`
 
 Other things to know:
+
+- `pm.environment` and `pm.collectionVariables` are two names for the collection's
+  variables, so a Postman script that reads or saves "environment" values works on the
+  collection the request is in.
 
 - A value a script sets is stored as a "This Mac only" value.
 - Scripts on a collection or folder run in Postman's order, but can't be edited in the
@@ -365,7 +364,7 @@ TLS 1.2, and the Log tab says so.
 ## 13. Tools
 
 **Command palette (⌘K).** Search every request and command: go to a request, send, run a
-collection, switch environment, start a mock, change theme.
+collection, start a mock, change theme.
 
 **Copy as code.** The braces button beside a request's name, or **Request > Copy as
 Code… (⌥⌘C)**, shows the request as cURL, JavaScript, Python or Swift with variables
@@ -376,8 +375,8 @@ on, secrets are masked in the copy.
 its address. While a mock is running, closing the window leaves the app running so the
 mock stays up. **View > Show Mock Servers in Menu Bar** turns the item off.
 
-**Shortcuts.** The Shortcuts app gets five actions: Send Request, Run Collection, Start
-Mock Server, Stop Mock Server and Set Environment. They act on the workspace that is open
+**Shortcuts.** The Shortcuts app gets four actions: Send Request, Run Collection, Start
+Mock Server and Stop Mock Server. They act on the workspace that is open
 in the app.
 
 ## 14. Demoing an API
@@ -393,8 +392,7 @@ down, and it is what the mock server serves.
 request's pinned responses, so a demo needs no backend and no network. It listens on
 `127.0.0.1` only. A request with nothing pinned is answered with 501. When a collection's
 addresses start with a shared variable such as `{{baseUrl}}`, starting the mock points
-that variable at it through a temporary environment, which is removed when the mock
-stops. The sheet lists the requests the mock has received.
+that variable at the mock until it stops. The sheet lists the requests the mock has received.
 
 **Demo sequences.** **Demo > New Demo…** makes an ordered list of requests, each with a
 short note.
@@ -486,7 +484,7 @@ committed.
 
 Limits: no stash, rebase, tags or amend. A merge needs a clean workspace first. A vault
 inside a larger repository is not synced. Committing is refused while the mock server
-runs, because the mock keeps a temporary environment in the workspace.
+runs, because the mock keeps a temporary file in the workspace.
 
 ## 17. Themes
 

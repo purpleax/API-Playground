@@ -505,7 +505,7 @@ private struct GitSettingsTab: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text("What is shared").sectionTitle()
-                    Text("Collections, requests, environments and their starting values are committed. Secret values stay in this Mac's Keychain, and current values, cookies, history and OAuth tokens stay in the app's private data. None of those are committed.")
+                    Text("Collections, requests, variables and their starting values are committed. Secret values stay in this Mac's Keychain, and current values, cookies, history and OAuth tokens stay in the app's private data. None of those are committed.")
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

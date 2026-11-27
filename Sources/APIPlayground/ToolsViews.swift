@@ -36,7 +36,7 @@ struct CodeSnippetView: View {
             HStack {
                 Text(model.secretsHidden
                      ? "Secrets are hidden, so they are masked here too. Switch Hide Secrets off to copy working code."
-                     : "Variables are filled in from the current environment, so the code may contain secrets.")
+                     : "Variables are filled in, so the code may contain secrets.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
@@ -452,130 +452,5 @@ struct ToastView: View {
             .padding(.bottom, 22)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityAddTraits(.isStaticText)
-    }
-}
-
-/// One request sent in two environments, with the differences between the two responses.
-struct EnvironmentCompareView: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if let comparison = model.environmentComparison {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Compare “\(comparison.name)” Across Environments")
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
-                    Text("Sends the request once in each environment and shows what differs. Nothing is added to the history and no variables are saved.")
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(14)
-                Divider()
-
-                HStack(spacing: 10) {
-                    picker("First environment", selection: \.leftID)
-                    Image(systemName: "arrow.right").foregroundStyle(Theme.textTertiary)
-                    picker("Second environment", selection: \.rightID)
-                    Spacer()
-                    if comparison.isRunning {
-                        ProgressView().controlSize(.small)
-                    }
-                    Button(comparison.left == nil ? "Compare" : "Compare Again") { model.runComparison() }
-                        .buttonStyle(PrimaryButtonStyle())
-                        .disabled(comparison.isRunning || comparison.leftID == comparison.rightID)
-                        .help(comparison.leftID == comparison.rightID ? "Choose two different environments" : "Send the request in both environments")
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                Divider()
-
-                if let left = comparison.left, let right = comparison.right {
-                    results(comparison, left, right)
-                } else {
-                    EmptyState(
-                        systemImage: "arrow.left.arrow.right",
-                        title: comparison.isRunning ? "Sending…" : "Ready",
-                        detail: comparison.isRunning ? "Waiting for both responses." : "Choose two environments, then press Compare."
-                    )
-                }
-
-                Divider()
-                HStack {
-                    Spacer()
-                    Button("Done") { model.environmentComparison = nil }
-                        .keyboardShortcut(.cancelAction)
-                }
-                .padding(12)
-            }
-            .frame(width: 760, height: 600)
-        }
-    }
-
-    private func picker(_ label: String, selection: WritableKeyPath<EnvironmentComparison, UUID?>) -> some View {
-        Picker(label, selection: Binding(
-            get: { model.environmentComparison?[keyPath: selection] },
-            set: { model.environmentComparison?[keyPath: selection] = $0 }
-        )) {
-            Text("No Environment").tag(UUID?.none)
-            ForEach(model.environments) { environment in
-                Text(environment.name).tag(UUID?.some(environment.id))
-            }
-        }
-        .labelsHidden()
-        .fixedSize()
-        .accessibilityLabel(label)
-    }
-
-    private func summary(_ name: String, _ result: RequestRunResult) -> some View {
-        HStack(spacing: 8) {
-            Text(name)
-                .font(.system(size: 12.5, weight: .semibold))
-                .lineLimit(1)
-            if let response = result.response {
-                Chip(text: "\(response.status) \(response.statusText)".trimmingCharacters(in: .whitespaces),
-                     color: ResponseView.statusColor(response.status, grpc: response.httpVersion == "gRPC"))
-                Text(ResponseView.duration(response.timings.total))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(Theme.textSecondary)
-            } else {
-                Text(result.error ?? "No response")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.danger)
-                    .lineLimit(2)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raised.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.smallRadius))
-    }
-
-    private static func text(_ response: HTTPResponse) -> String {
-        LineDiff.prettyJSON(response.body) ?? response.text ?? "\(response.body.count) bytes of binary data"
-    }
-
-    @ViewBuilder
-    private func results(_ comparison: EnvironmentComparison, _ left: RequestRunResult, _ right: RequestRunResult) -> some View {
-        let leftName = model.environmentName(comparison.leftID)
-        let rightName = model.environmentName(comparison.rightID)
-        HStack(spacing: 10) {
-            summary(leftName, left)
-            summary(rightName, right)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        if let a = left.response, let b = right.response {
-            let redactor = model.redactor(for: comparison.requestID)
-            let lines = LineDiff.diff(old: Self.text(a), new: Self.text(b))
-            let same = lines.allSatisfy { $0.kind == .same }
-            Text(same ? "The two bodies are identical." : "Changes in the body from \(leftName) to \(rightName):")
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 6)
-            Divider()
-            DiffView(lines: redactor.map { r in lines.map { DiffLine(kind: $0.kind, text: r.redact($0.text)) } } ?? lines)
-        } else {
-            Spacer()
-        }
     }
 }

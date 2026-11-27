@@ -151,16 +151,22 @@ let petsBody = """
     }
 
     @Test func variablesAreReadAndWrittenByScope() {
+        // There are two places: the globals and the collection. What a Postman script calls
+        // the environment is the collection's variables under another name.
         var state = RunState(
             globals: [Variable(key: "g", value: "global"), Variable(key: "shared", value: "from-globals")],
-            collectionVariables: [Variable(key: "shared", value: "from-collection"), Variable(key: "gone", value: "x")],
-            environment: [Variable(key: "token", value: "old"), Variable(key: "secret", value: "s1", secret: true),
-                          Variable(key: "off", value: "hidden", enabled: false)]
+            collectionVariables: [
+                Variable(key: "shared", value: "from-collection"), Variable(key: "gone", value: "x"),
+                Variable(key: "token", value: "old"), Variable(key: "secret", value: "s1", secret: true),
+                Variable(key: "off", value: "hidden", enabled: false),
+            ]
         )
         var request = ScriptRequest(method: "GET", url: "{{base}}/pets")
         let outcome = run("""
         pm.test("reads", () => {
             pm.expect(pm.environment.get("token")).to.equal("old");
+            pm.expect(pm.collectionVariables.get("token")).to.equal("old");
+            pm.expect(pm.environment.get("shared")).to.equal("from-collection");
             pm.expect(pm.environment.has("off")).to.be.false;
             pm.expect(pm.variables.get("shared")).to.equal("from-collection");
             pm.expect(pm.variables.get("g")).to.equal("global");
@@ -168,6 +174,10 @@ let petsBody = """
             pm.expect(pm.variables.replaceIn("{{g}}/{{nope}}")).to.equal("global/{{nope}}");
         });
         pm.environment.set("token", pm.response.json().pets[0].name);
+        pm.test("one set of variables", () => {
+            pm.expect(pm.collectionVariables.get("token")).to.equal("Rex");
+            pm.expect(pm.variables.get("token")).to.equal("Rex");
+        });
         pm.environment.set("created", { id: 7 });
         pm.environment.set("secret", "s2");
         pm.collectionVariables.unset("gone");
@@ -176,21 +186,43 @@ let petsBody = """
         """, state: &state, request: &request)
 
         #expect(outcome.error == nil)
-        #expect(outcome.tests.first?.passed == true, "\(outcome.tests.first?.message ?? "")")
+        #expect(outcome.tests.map(\.passed) == [true, true], "\(outcome.tests.map { $0.message ?? "" })")
 
+        // Nothing is saved into a separate environment: it all lands in the collection.
+        #expect(state.environment.isEmpty)
         // A script's value is a current value: the shared value in the file stays as it was.
-        let token = state.environment.first { $0.key == "token" }
+        let token = state.collectionVariables.first { $0.key == "token" }
         #expect(token?.value == "old")
         #expect(token?.currentValue == "Rex")
-        #expect(state.environment.first { $0.key == "created" }?.effectiveValue == "{\"id\":7}")
+        #expect(state.collectionVariables.first { $0.key == "created" }?.effectiveValue == "{\"id\":7}")
         // A secret has no separate current value; its value is already kept locally.
-        #expect(state.environment.first { $0.key == "secret" }?.value == "s2")
+        #expect(state.collectionVariables.first { $0.key == "secret" }?.value == "s2")
         // A disabled variable is untouched.
-        #expect(state.environment.first { $0.key == "off" } == Variable(key: "off", value: "hidden", enabled: false))
+        #expect(state.collectionVariables.first { $0.key == "off" } == Variable(key: "off", value: "hidden", enabled: false))
         #expect(!state.collectionVariables.contains { $0.key == "gone" })
         #expect(state.globals.first { $0.key == "count" }?.effectiveValue == "3")
         #expect(state.locals == ["temp": "local"])
         #expect(state.resolver.resolve("{{token}} {{temp}} {{shared}}").string == "Rex local from-collection")
+    }
+
+    @Test func valuesTheMockPutsInFrontAreReadButNeverSavedInto() {
+        // The mock server points a collection at itself with values that stand in front of
+        // the collection's for a run. A script sees them, and what it saves goes to the collection.
+        var state = RunState(
+            collectionVariables: [Variable(key: "baseUrl", value: "https://example.com")],
+            environment: [Variable(key: "baseUrl", value: "http://127.0.0.1:9000")]
+        )
+        var request = ScriptRequest(method: "GET", url: "{{baseUrl}}/pets")
+        let outcome = run("""
+        pm.test("the mock's address is used", () => {
+            pm.expect(pm.variables.get("baseUrl")).to.equal("http://127.0.0.1:9000");
+        });
+        pm.environment.set("seen", "yes");
+        """, state: &state, request: &request)
+        #expect(outcome.tests.first?.passed == true, "\(outcome.tests.first?.message ?? "")")
+        #expect(state.environment == [Variable(key: "baseUrl", value: "http://127.0.0.1:9000")])
+        #expect(state.collectionVariables.first { $0.key == "seen" }?.effectiveValue == "yes")
+        #expect(state.resolver.resolve("{{baseUrl}}").string == "http://127.0.0.1:9000")
     }
 
     @Test func preRequestScriptsCanChangeHeadersAndBody() {
@@ -210,7 +242,7 @@ let petsBody = """
         #expect(request.headers == [.init(key: "Accept", value: "application/json"), .init(key: "X-Signature", value: "dXNlcjpwYXNz")])
         #expect(request.body == "{\"at\":1}")
         #expect(outcome.logs == ["method POST example.com {\"a\":1}", "warn: careful"])
-        #expect(state.environment.first?.effectiveValue == "user:pass")
+        #expect(state.collectionVariables.first?.effectiveValue == "user:pass")
     }
 
     @Test func legacyApiStillWorks() {
@@ -224,7 +256,7 @@ let petsBody = """
         """, state: &state, request: &request)
         #expect(outcome.error == nil)
         #expect(outcome.tests == [TestResult(name: "Status is 200", passed: true), TestResult(name: "Has three pets", passed: false)])
-        #expect(state.environment.first?.effectiveValue == "Rex")
+        #expect(state.collectionVariables.first?.effectiveValue == "Rex")
     }
 
     @Test func errorsAreReportedWithALine() {
@@ -315,7 +347,7 @@ let petsBody = """
             #expect(result.tests.map(\.passed) == [false, true, true, false, true, true, false], "\(result.tests)")
             #expect(!result.passed)
             #expect(result.failedTests.count == 3)
-            #expect(state.environment.first { $0.key == "savedPath" }?.currentValue == "/items")
+            #expect(state.collectionVariables.first { $0.key == "savedPath" }?.currentValue == "/items")
         }
     }
 

@@ -17,7 +17,7 @@ It is a standalone app. It has no server component and no running costs.
 
 The app is for four things, in this order of priority:
 
-1. **Manage** — organise requests into collections and folders, with environments and variables.
+1. **Manage** — organise requests into collections and folders, with variables.
 2. **Run** — send requests and inspect responses in detail.
 3. **Test** — assert on responses and run a set of requests as a suite.
 4. **Demo** — present an API to an audience, safely and reliably.
@@ -89,7 +89,7 @@ This is the acceptance test for phase 1: import a real Postman collection and en
 
 ### Details that have to be right
 
-- **Variable scopes.** Postman resolves `{{name}}` across globals, collection variables and environment, with the narrower scope winning. The app uses the same scopes in the same order.
+- **Variable scopes.** Postman resolves `{{name}}` across globals, collection variables and environment, with the narrower scope winning. The app has two of the three, globals and collection variables, in the same order. An imported environment is added to a collection the user chooses, and `pm.environment` in a script means the collection's variables. This was decided in November 2026, after environments shown beside collection variables proved confusing: a collection has one set of variables and there is nothing to switch.
 - **Initial and current values.** The initial value is imported as the shared default. Current values stay local to the machine.
 - **Secret variables.** Variables marked secret in Postman go into the Keychain on import.
 - **Disabled items.** Variables, headers and query parameters switched off in Postman stay present but switched off.
@@ -125,7 +125,7 @@ Every item under [Features](#features) is now built as well, the last of them in
 - Request editor with params, headers, body, auth and description tabs.
 - Response viewer with preview, headers, cookies and the raw wire log.
 - **Timing waterfall** — DNS, connect, TLS, time to first byte and download for each request.
-- **Response diff** — compare two runs of one request, or one request across two environments.
+- **Response diff** — compare two runs of one request.
 - **Response history** — every past response for a request is kept and can be pinned.
 - **Response filtering** — JSONPath or jq expressions over the body, saved per request.
 - **Streaming viewer** — server-sent events and chunked responses shown as they arrive.
@@ -137,7 +137,7 @@ Every item under [Features](#features) is now built as well, the last of them in
 
 - Basic, Bearer, API key and OAuth 2, with auth inherited from folders and collections.
 - Cookie jar per workspace.
-- Environments with global, collection and environment scopes, and a quick switcher.
+- Variables in two scopes, global and collection. No environments and no switcher.
 
 ### Testing
 

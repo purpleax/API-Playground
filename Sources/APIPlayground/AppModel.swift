@@ -129,8 +129,6 @@ final class AppModel {
             executor.proxy = proxy
         }
     }
-    /// A request being compared across two environments.
-    var environmentComparison: EnvironmentComparison?
     /// Whether to refuse servers whose certificate cannot be verified. Off suits a local
     /// server with a self-signed certificate.
     var verifyTLS = UserDefaults.standard.object(forKey: "verifyTLS") as? Bool ?? true {
@@ -202,6 +200,13 @@ final class AppModel {
     var historyVersion = 0
     var notice: Notice?
     var showingEnvironments = false
+    /// Imported environments waiting to be told which collection they join. The first is
+    /// the one being asked about.
+    var pendingEnvironments: [PendingEnvironment] = []
+    /// The import report, held back while environments are waiting.
+    @ObservationIgnored private var heldImportLines: [String] = []
+    /// The collection most recently imported, offered first for an environment imported with it.
+    @ObservationIgnored private var lastImportedCollection: UUID?
     /// The collection the Variables sheet should open on. Nil opens it where it usually does.
     var variablesCollection: UUID?
     var runner: RunnerSession?
@@ -319,8 +324,10 @@ final class AppModel {
             ruleset = store.loadRuleset()
             if let selectedSpec, spec(selectedSpec) == nil { self.selectedSpec = nil }
             expanded.formUnion(collections.map(\.id))
-            let saved = UserDefaults.standard.string(forKey: "activeEnvironment").flatMap(UUID.init(uuidString:))
-            activeEnvironmentID = environments.contains { $0.id == saved } ? saved : nil
+            // Nobody chooses an environment any more. The only one ever in force is the
+            // temporary one a running mock server points its collection at itself with.
+            let mockEnvironment = mock?.environmentID
+            activeEnvironmentID = environments.contains { $0.id == mockEnvironment } ? mockEnvironment : nil
             removeLeftoverMockEnvironment()
             loadCookies()
             if let selection, request(selection) == nil { self.selection = nil }
@@ -488,6 +495,68 @@ final class AppModel {
         if activeEnvironmentID == id { activeEnvironmentID = nil }
         do { try store.deleteEnvironment(id: id) } catch { show("Could not delete the environment", error) }
         refreshGit()
+    }
+
+    /// Environments in the workspace's files that nothing uses: left by an earlier version
+    /// of the app, or brought in by Git. The mock server's temporary one is not among them.
+    var unusedEnvironments: [APIEnvironment] {
+        environments.filter { $0.id != mock?.environmentID }
+    }
+
+    /// Adds an environment's variables to a collection's own, and removes the environment
+    /// from the workspace if it was kept there.
+    /// - Returns: A sentence saying what was done, or nil when the collection is not there.
+    @discardableResult
+    func adopt(_ environment: APIEnvironment, into collectionID: UUID) -> String? {
+        guard let index = collections.firstIndex(where: { $0.id == collectionID }) else { return nil }
+        let result = collections[index].adopt(environment)
+        save(collections[index])
+        if environments.contains(where: { $0.id == environment.id }) { deleteEnvironment(environment.id) }
+        var parts: [String] = []
+        if result.added > 0 { parts.append("\(Self.count(result.added, "variable")) added") }
+        if result.replaced > 0 { parts.append("\(result.replaced) replaced") }
+        if parts.isEmpty { parts.append("it had no variables") }
+        return "Added the environment \"\(environment.name)\" to the collection \"\(collections[index].name)\": \(parts.joined(separator: ", "))."
+    }
+
+    /// The collection an imported environment most likely belongs to: one imported with it,
+    /// otherwise the one being worked in.
+    var suggestedCollectionForImport: UUID? {
+        if let id = lastImportedCollection, collections.contains(where: { $0.id == id }) { return id }
+        if let selection, let index = collectionIndex(containingRequest: selection) { return collections[index].id }
+        return collections.first?.id
+    }
+
+    /// Answers the question of where the first waiting environment goes, and shows the
+    /// import report once none are left waiting.
+    func resolvePendingEnvironment(_ destination: EnvironmentDestination) {
+        guard !pendingEnvironments.isEmpty else { return }
+        let pending = pendingEnvironments.removeFirst()
+        let name = pending.environment.name
+        switch destination {
+        case .skip:
+            heldImportLines.append("Skipped the environment \"\(name)\".")
+        case .collection(let id):
+            heldImportLines.append(adopt(pending.environment, into: id) ?? "Skipped the environment \"\(name)\": that collection is no longer there.")
+            heldImportLines.append(contentsOf: pending.warnings)
+        case .newCollection:
+            var collection = APICollection(name: uniqueName(name, among: collections.map(\.name)))
+            collection.adopt(pending.environment)
+            collections.append(collection)
+            expanded.insert(collection.id)
+            save(collection)
+            heldImportLines.append("Made the collection \"\(collection.name)\" from the environment \"\(name)\": \(Self.count(collection.variables.count, "variable")).")
+            heldImportLines.append(contentsOf: pending.warnings)
+        }
+        if pendingEnvironments.isEmpty {
+            let report = Notice(title: "Import finished", message: heldImportLines.joined(separator: "\n"))
+            heldImportLines = []
+            // The question's sheet is still closing. An alert shown over it would be dropped.
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                self?.notice = report
+            }
+        }
     }
 
     /// Opens the Variables sheet on a collection's own variables.
@@ -1111,6 +1180,11 @@ final class AppModel {
                 lines.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
+        // An environment has to be given a collection first. The report waits for that.
+        if !pendingEnvironments.isEmpty {
+            heldImportLines.append(contentsOf: lines)
+            return
+        }
         let report = Notice(title: "Import finished", message: lines.joined(separator: "\n"))
         // SwiftUI drops an alert set before the window exists, which happens when files are
         // opened at launch. Hold the report until the window is up.
@@ -1138,6 +1212,7 @@ final class AppModel {
             }
             expanded.insert(collection.id)
             save(collection)
+            lastImportedCollection = collection.id
             if let selection, request(selection) == nil { self.selection = nil }
 
             var lines = ["\(verb) collection \"\(collection.name)\": \(Self.count(report.requests, "request")), \(Self.count(report.folders, "folder")), \(Self.count(report.examples, "example")), \(Self.count(report.variables, "variable"))."]
@@ -1163,7 +1238,7 @@ final class AppModel {
         case .settings(let settings):
             return apply(settings)
 
-        case .environment(var environment, let isGlobals, let report):
+        case .environment(let environment, let isGlobals, let report):
             if isGlobals {
                 var merged = globals
                 for variable in environment.variables {
@@ -1173,20 +1248,14 @@ final class AppModel {
                 saveGlobals(merged)
                 return ["Imported \(Self.count(report.variables, "global variable"))."]
             }
-            var verb = "Imported"
-            if let index = environments.firstIndex(where: {
-                ($0.postmanID != nil && $0.postmanID == environment.postmanID) || $0.name == environment.name
-            }) {
-                environment.id = environments[index].id
-                verb = "Updated"
-            }
-            saveEnvironment(environment)
-            if activeEnvironmentID == nil { activeEnvironmentID = environment.id }
-            return ["\(verb) environment \"\(environment.name)\": \(Self.count(report.variables, "variable"))."] + report.warnings
+            // A collection has one set of variables, so an environment joins a collection.
+            // Which one is asked once the files have been read.
+            pendingEnvironments.append(PendingEnvironment(environment: environment, warnings: report.warnings))
+            return []
         }
     }
 
-    private static func count(_ number: Int, _ noun: String) -> String {
+    static func count(_ number: Int, _ noun: String) -> String {
         "\(number) \(noun)\(number == 1 ? "" : "s")"
     }
 

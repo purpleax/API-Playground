@@ -91,59 +91,40 @@ import Testing
         #expect(variable.shownValue == "abc")
     }
 
-    @Test func anEnvironmentGivesAVariableAnotherValue() {
-        var staging = APIEnvironment(name: "Staging")
-        #expect(staging.override(named: "baseUrl") == nil)
-        staging.setOverride("https://staging.example.com", for: "baseUrl")
-        #expect(staging.variables == [Variable(key: "baseUrl", value: "https://staging.example.com")])
-
-        // Typing over it changes the value, and switches it back on.
-        staging.variables[0].enabled = false
-        staging.setOverride("https://s2.example.com", for: "baseUrl")
-        #expect(staging.variables == [Variable(key: "baseUrl", value: "https://s2.example.com")])
-
-        // A value saved into the environment by a request stays on this Mac when edited.
-        staging.variables.append(Variable(key: "token", value: "", currentValue: "abc"))
-        staging.setOverride("def", for: "token")
-        #expect(staging.override(named: "token")?.currentValue == "def")
-        #expect(staging.override(named: "token")?.value == "")
-
-        // Emptying the cell takes the value away, so the collection's applies again.
-        staging.setOverride("", for: "baseUrl")
-        #expect(staging.override(named: "baseUrl") == nil)
-        staging.setOverride("x", for: "")
-        #expect(staging.variables.map(\.key) == ["token"])
-
-        staging.setOverride("s3cret", for: "password", secret: true)
-        #expect(staging.override(named: "password")?.secret == true)
-    }
-
-    @Test func anEnvironmentsValueFollowsARename() {
-        var staging = APIEnvironment(name: "Staging", variables: [
-            Variable(key: "baseUrl", value: "a"), Variable(key: "host", value: "b"),
+    @Test func anImportedEnvironmentJoinsACollectionsVariables() {
+        var collection = APICollection(name: "Shop", variables: [
+            Variable(key: "baseUrl", value: ""), Variable(key: "token", value: "old"),
         ])
-        let renamed = staging.renameVariable("baseUrl", to: "address")
-        #expect(renamed)
-        #expect(staging.variables.map(\.key) == ["address", "host"])
-        // A name that is already taken is left alone, and so is an empty one.
-        let taken = staging.renameVariable("address", to: "host")
-        #expect(!taken)
-        let emptied = staging.renameVariable("address", to: "")
-        #expect(emptied)
-        #expect(staging.variables.map(\.key) == ["address", "host"])
+        let environment = APIEnvironment(name: "Production", variables: [
+            Variable(key: "baseUrl", value: "https://example.com"),
+            Variable(key: "region", value: "eu", secret: true),
+            Variable(key: "", value: "ignored"),
+        ])
+        let result = collection.adopt(environment)
+        #expect(result.added == 1)
+        #expect(result.replaced == 1)
+        #expect(collection.variables.map(\.key) == ["baseUrl", "token", "region"])
+        #expect(collection.variables[0].value == "https://example.com")
+        #expect(collection.variables[1].value == "old")
+        #expect(collection.variables[2].secret)
     }
 
-    @Test func namesOnlyInEnvironmentsAreListedOnce() {
-        let staging = APIEnvironment(name: "Staging", variables: [Variable(key: "baseUrl", value: "a"), Variable(key: "region", value: "eu")])
-        let production = APIEnvironment(name: "Production", variables: [Variable(key: "region", value: "us"), Variable(key: "", value: "x"), Variable(key: "tier", value: "1")])
-        #expect(VariableTable.names(onlyIn: [staging, production], notAmong: ["baseUrl", "token"]) == ["region", "tier"])
-        #expect(VariableTable.names(onlyIn: [], notAmong: []) == [])
-    }
+    @Test func savingToTheEnvironmentSavesToTheCollection() {
+        var state = RunState(collectionVariables: [Variable(key: "token", value: "")])
+        state.set("token", to: "abc", scope: .environment)
+        state.set("fresh", to: "1", scope: .environment)
+        #expect(state.environment.isEmpty)
+        #expect(state.collectionVariables.map(\.key) == ["token", "fresh"])
+        #expect(state.collectionVariables[0].currentValue == "abc")
+        state.unset("fresh", scope: .environment)
+        #expect(state.collectionVariables.map(\.key) == ["token"])
+        state.set("shared", to: "x", scope: .globals)
+        #expect(state.globals.map(\.key) == ["shared"])
 
-    @Test func aNewEnvironmentGetsANameOfItsOwn() {
-        #expect(VariableTable.newEnvironmentName(among: []) == "New Environment")
-        let taken = [APIEnvironment(name: "New Environment"), APIEnvironment(name: "New Environment 2")]
-        #expect(VariableTable.newEnvironmentName(among: taken) == "New Environment 3")
+        #expect(VariableScopeKind.choices == [.collection, .globals])
+        #expect(VariableScopeKind.environment.place == .collection)
+        #expect(VariableScopeKind.environment.label == "Collection")
+        #expect(Extraction().scope == .collection)
     }
 }
 

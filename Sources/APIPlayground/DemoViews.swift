@@ -32,7 +32,7 @@ struct MockView: View {
                         .help("Copy the address")
                     }
                     if let variable = session.baseVariable {
-                        Text("Requests that start with {{\(variable)}} now go to the mock, through a temporary environment that is removed when the mock stops.")
+                        Text("Requests that start with {{\(variable)}} now go to the mock until it stops.")
                             .foregroundStyle(Theme.textSecondary)
                     } else {
                         Text("This collection's URLs do not start with a shared variable, so point requests at the address above yourself.")
